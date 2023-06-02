@@ -35,32 +35,34 @@ pub const SegmentPair = struct {
 pub const SegmentedStorage = struct {
 
     memory: [FULL_INLINE_SIZE]u32,
+    used: usize = 0,
 
-    pub fn init(pairs: ?[] const SegmentPair) SegmentedStorage {
+    fn init(pairs: ?[] const SegmentPair) SegmentedStorage {
         var storage: SegmentedStorage = undefined;
 
-        @memset(&storage.memory, 0);
+        storage.clear(); // zero out all memory
 
-        if(pairs) |slice|{
-            
-            var n: usize = @min(slice.len, HALF_INLINE_SIZE);
+        if(pairs) |slice|{            
+            const n: usize = @min(slice.len, HALF_INLINE_SIZE);
 
             var i: usize = 0;
 
             while(i < n) : (i += 1) {
-                storage.setPair(i, slice[i]);            
+                storage.addPair(slice[i]);            
             }
         }
         return storage;
     }
 
-    fn getLower(self: *SegmentedStorage, i: usize) u32 {
+    // segmented index getters
+    fn getLower(self: * const SegmentedStorage, i: usize) u32 {
         return self.*.memory[i];
     }
-    fn getUpper(self: *SegmentedStorage, i: usize) u32 {
+    fn getUpper(self: * const SegmentedStorage, i: usize) u32 {
         return self.*.memory[HALF_INLINE_SIZE + i];
     }
 
+    // segemented index setters
     fn setLower(self: *SegmentedStorage, i: usize, value: u32) void {
         self.*.memory[i] = value;
     }
@@ -68,26 +70,43 @@ pub const SegmentedStorage = struct {
         self.*.memory[HALF_INLINE_SIZE + i] = value;
     }
 
-    fn getPair(self: *SegmentedStorage, i: usize) SegmentPair {
+    // pairwise setter/getter
+    fn getPair(self: * const SegmentedStorage, i: usize) SegmentPair {
         return .{ .lower= self.*.getLower(i), .upper = self.*.getUpper(i) };
     }
     fn setPair(self: *SegmentedStorage, i: usize, pair: SegmentPair) void {
         self.*.setLower(i, pair.lower);
         self.*.setUpper(i, pair.upper);
     }
-
-    fn sliceLower(self: *SegmentedStorage) [] const u32 {
-        return self.*.memory[0..HALF_INLINE_SIZE];
-    }
-    fn sliceUpper(self: *SegmentedStorage) [] const u32 {
-        return self.*.memory[HALF_INLINE_SIZE..];
+    fn addPair(self: *SegmentedStorage, pair: SegmentPair) void {
+        self.*.setPair(self.*.used, pair);
+        self.*.used += 1;
     }
 
-    fn copyFrom(self: *SegmentedStorage, other: *SegmentedStorage) void {
+    // segmented slicing functions
+    fn sliceLower(self: * const SegmentedStorage) [] const u32 {
+        return self.*.memory[0..self.*.used];
+    }
+    fn sliceUpper(self: * const SegmentedStorage) [] const u32 {
+        return self.*.memory[HALF_INLINE_SIZE..HALF_INLINE_SIZE + self.*.used];
+    }
+
+    fn copyFrom(self: *SegmentedStorage, other: * const SegmentedStorage) void {
         @memcpy(&self.*.memory, &other.*.memory);        
+        self.*.used = other.*.used;
     }
-    fn size() u8 {
-        return FULL_INLINE_SIZE;
+
+    fn clear(self: *SegmentedStorage) void {
+        @memset(&self.*.memory, 0);
+        self.*.used = 0;
+    }
+
+    fn empty(self: * const SegmentedStorage) bool {
+        return self.*.used == 0;
+    }
+
+    fn size(self: * const SegmentedStorage) usize {
+        return self.*.used;
     }
 };
 
@@ -100,19 +119,31 @@ test "Initialization" {
             .{ .lower = 100, .upper = 100 },
             .{ .lower = 101, .upper = 101 },
             .{ .lower = 102, .upper = 102 },
+            .{ .lower = 103, .upper = 103 },
+            .{ .lower = 104, .upper = 104 },
         });
 
     var s2 = SegmentedStorage.init(null);
-    s2.setPair(0, .{ .lower = 100, .upper = 100 });
-    s2.setPair(1, .{ .lower = 101, .upper = 101 });
-    s2.setPair(2, .{ .lower = 102, .upper = 102 });
+    s2.addPair(.{ .lower = 100, .upper = 100 });
+    s2.addPair(.{ .lower = 101, .upper = 101 });
+    s2.addPair(.{ .lower = 102, .upper = 102 });
+    s2.addPair(.{ .lower = 103, .upper = 103 });
+    s2.addPair(.{ .lower = 104, .upper = 104 });
+
+    try std.testing.expect(s1.size() == 5);
+    try std.testing.expect(s1.size() == s2.size());
 
     try std.testing.expect(s1.getLower(0) == s2.getLower(0));
     try std.testing.expect(s1.getLower(1) == s2.getLower(1));
     try std.testing.expect(s1.getLower(2) == s2.getLower(2));
+    try std.testing.expect(s1.getLower(3) == s2.getLower(3));
+    try std.testing.expect(s1.getLower(4) == s2.getLower(4));
+
     try std.testing.expect(s1.getUpper(0) == s2.getUpper(0));
     try std.testing.expect(s1.getUpper(1) == s2.getUpper(1));
     try std.testing.expect(s1.getUpper(2) == s2.getUpper(2));
+    try std.testing.expect(s1.getUpper(3) == s2.getUpper(3));
+    try std.testing.expect(s1.getUpper(4) == s2.getUpper(4));
 }
 
 test "Slicing" {
@@ -124,16 +155,29 @@ test "Slicing" {
         });
 
     var s2 = SegmentedStorage.init(null);
-    s2.setPair(0, .{ .lower = 100, .upper = 100 });
-    s2.setPair(1, .{ .lower = 101, .upper = 101 });
-    s2.setPair(2, .{ .lower = 102, .upper = 102 });
+    s2.addPair(.{ .lower = 100, .upper = 100 });
+    s2.addPair(.{ .lower = 101, .upper = 101 });
+    s2.addPair(.{ .lower = 102, .upper = 102 });
+    
+    try std.testing.expect(s1.size() == 3);
+    try std.testing.expect(s1.size() == s2.size());
+
+    var count: usize = 0;
 
     for(s1.sliceLower(), s2.sliceLower()) |i, j| {
         try std.testing.expect(i == j);
+        count += 1;
     }
+    try std.testing.expect(count == 3);
+    
+    count = 0;
+    
     for(s1.sliceUpper(), s2.sliceUpper()) |i, j| {
         try std.testing.expect(i == j);
+        count += 1;
     }
+
+    try std.testing.expect(count == 3);
 }
 
 test "Copying" {
@@ -142,6 +186,8 @@ test "Copying" {
             .{ .lower = 100, .upper = 100 },
             .{ .lower = 101, .upper = 101 },
             .{ .lower = 102, .upper = 102 },
+            .{ .lower = 103, .upper = 103 },
+            .{ .lower = 104, .upper = 104 },
         });
 
     var s2 = SegmentedStorage.init(null);
