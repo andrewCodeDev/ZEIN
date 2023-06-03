@@ -35,7 +35,7 @@ pub const SegmentPair = struct {
 ///////////////////////////////////////////////////////
 // Split SegmentPairs into a contiguous segmented array
 
-fn initializeSegmentMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
+fn initializeSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
    // this is a hack because init will cause an error
    // if we don't return the struct type directly    
     var memory: [n * 2]u32 = undefined;
@@ -68,7 +68,7 @@ fn initializeSegmentMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32
         // init SegmentedMemory from an optional pair array
         pub fn init(pairs: ?[segment_size]SegmentPair) Self {
             return Self {
-                .memory = initializeSegmentMemory(segment_size, pairs),
+                .memory = initializeSegmentedMemory(segment_size, pairs),
             };
         }
         
@@ -97,7 +97,7 @@ fn initializeSegmentMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32
             self.*.setUpper(i, pair.upper);
         }
         pub fn setPairs(self: *Self, pairs: ?[segment_size]SegmentPair) void {
-            self.*.memory = initializeSegmentMemory(segment_size, pairs);
+            self.*.memory = initializeSegmentedMemory(segment_size, pairs);
         }
 
         //// segmented slicing functions
