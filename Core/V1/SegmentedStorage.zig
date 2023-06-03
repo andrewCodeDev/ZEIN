@@ -39,6 +39,7 @@ fn initializeSegmentMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32
    // this is a hack because init will cause an error
    // if we don't return the struct type directly    
     var memory: [n * 2]u32 = undefined;
+
     if (pairs) |data| 
     {
         var i: usize = 0;
