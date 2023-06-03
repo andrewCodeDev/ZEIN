@@ -10,7 +10,7 @@
 //               ^
 //               ^ - Start of the second segment
 
-// This class makes an assumption that each index has an upper and lower pair.
+// This class makes an assumption that each index has an stride and size pair.
 // Therefore, it doesn't make sense to allow only placing a single element.
 
 // V1 makes the assumption that we probably need 5 strides (at most) to be practical
@@ -22,20 +22,15 @@
 // A potential work around is to return a slice (or some reference object) and use that.
 // That is cumbersome though, especially for internal implementation details.
 
-////////////////////////////////////////////////////
-// This struct is debatable. It may be better to use
-// a generic pair class instead of this, because I
-// forsee some tedious converions in the future.
-
-pub const SegmentPair = struct {
-    lower : u32 = 0,
-    upper : u32 = 0
+pub const SizeAndStride = struct {
+    size : u32 = 0,
+    stride : u32 = 0
 };
 
 ///////////////////////////////////////////////////////
-// Split SegmentPairs into a contiguous segmented array
+// Split SizeAndStrides into a contiguous segmented array
 
-fn initSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
+fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
    // this is a hack because init will cause an error
    // if we don't return the struct type directly    
     var memory: [n * 2]u32 = undefined;
@@ -44,8 +39,8 @@ fn initSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
     {
         var i: usize = 0;
         while(i < n) : (i += 1) {                        
-            memory[i]     = data[i].lower;            
-            memory[i + n] = data[i].upper;
+            memory[i]     = data[i].size;            
+            memory[i + n] = data[i].stride;
         }
     }
     else {
@@ -55,57 +50,54 @@ fn initSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
 }
 
 /////////////////////////////////////////
-// SegmentedStorage Struct Implementation 
+// SizesAndStrides Struct Implementation 
 
- fn SegmentedStorage(comptime segment_size: usize) type {
+ pub fn SizesAndStrides(comptime pair_count: usize) type {
 
     return struct {
 
         const Self = @This();
     
-        memory: [segment_size * 2]u32 = undefined,
+        memory: [pair_count * 2]u32 = undefined,
     
-        // init SegmentedMemory from an optional pair array
-        pub fn init(pairs: ?[segment_size]SegmentPair) Self {
+        // init SizesAndStrides from an optional pair array
+        pub fn init(pairs: ?[pair_count]SizeAndStride) Self {
             return Self {
-                .memory = initSegmentedMemory(segment_size, pairs),
+                .memory = initSizesAndStrides(pair_count, pairs),
             };
         }
         
         //// segmented index getters
-        pub fn getLower(self: Self, i: usize) u32 {
+        pub fn getSize(self: Self, i: usize) u32 {
             return self.memory[i];
         }
-        pub fn getUpper(self: Self, i: usize) u32 {
-            return self.memory[segment_size + i];
+        pub fn getStride(self: Self, i: usize) u32 {
+            return self.memory[pair_count + i];
         }
     
         //// segemented index setters
-        pub fn setLower(self: *Self, i: usize, value: u32) void {
+        pub fn setSize(self: *Self, i: usize, value: u32) void {
             self.*.memory[i] = value;
         }
-        pub fn setUpper(self: *Self, i: usize, value: u32) void {
-            self.*.memory[segment_size + i] = value;
+        pub fn setStride(self: *Self, i: usize, value: u32) void {
+            self.*.memory[pair_count + i] = value;
         }
     
         //// pairwise setters/getter
-        pub fn getPair(self: Self, i: usize) SegmentPair {
-            return .{ .lower= self.getLower(i), .upper = self.getUpper(i) };
+        pub fn getSizeAndStride(self: Self, i: usize) SizeAndStride {
+            return .{ .size= self.getSize(i), .stride = self.getStride(i) };
         }
-        pub fn setPair(self: *Self, i: usize, pair: SegmentPair) void {
-            self.*.setLower(i, pair.lower);
-            self.*.setUpper(i, pair.upper);
-        }
-        pub fn setPairs(self: *Self, pairs: ?[segment_size]SegmentPair) void {
-            self.*.memory = initSegmentedMemory(segment_size, pairs);
+        pub fn setSizeAndStride(self: *Self, i: usize, pair: SizeAndStride) void {
+            self.*.setSize(i, pair.size);
+            self.*.setStride(i, pair.stride);
         }
 
         //// segmented slicing functions
-        pub fn sliceLower(self: *const Self) [] const u32 {
-            return self.*.memory[0..segment_size];
+        pub fn sliceSizes(self: *const Self) [] const u32 {
+            return self.*.memory[0..pair_count];
         }
-        pub fn sliceUpper(self: *const Self) [] const u32 {
-            return self.*.memory[segment_size..segment_size * 2];
+        pub fn sliceStrides(self: *const Self) [] const u32 {
+            return self.*.memory[pair_count..pair_count * 2];
         }
     
         pub fn copyFrom(self: *Self, other: * const Self) void {
@@ -114,10 +106,10 @@ fn initSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
     
         // type sizes... member functions instead?
         pub fn segmentSize() usize {
-            return segment_size;
+            return pair_count;
         }
         pub fn capacity() usize {
-            return segment_size * 2;
+            return pair_count * 2;
         }
     };
 }
@@ -128,59 +120,59 @@ fn initSegmentedMemory(comptime n: usize, pairs: ?[n]SegmentPair) [n * 2]u32 {
 test "Initialization" {
     const std = @import("std");
 
-    var s1 = SegmentedStorage(5).init([_]SegmentPair{
-            .{ .lower = 100, .upper = 100 },
-            .{ .lower = 101, .upper = 101 },
-            .{ .lower = 102, .upper = 102 },
-            .{ .lower = 103, .upper = 103 },
-            .{ .lower = 104, .upper = 104 },
+    var s1 = SizesAndStrides(5).init([_]SizeAndStride{
+            .{ .size = 100, .stride = 100 },
+            .{ .size = 101, .stride = 101 },
+            .{ .size = 102, .stride = 102 },
+            .{ .size = 103, .stride = 103 },
+            .{ .size = 104, .stride = 104 },
         });
 
-    var s2 = SegmentedStorage(5).init(null);
+    var s2 = SizesAndStrides(5).init(null);
 
-    s2.setPair(0, .{ .lower = 100, .upper = 100 });
-    s2.setPair(1, .{ .lower = 101, .upper = 101 });
-    s2.setPair(2, .{ .lower = 102, .upper = 102 });
-    s2.setPair(3, .{ .lower = 103, .upper = 103 });
-    s2.setPair(4, .{ .lower = 104, .upper = 104 });
+    s2.setSizeAndStride(0, .{ .size = 100, .stride = 100 });
+    s2.setSizeAndStride(1, .{ .size = 101, .stride = 101 });
+    s2.setSizeAndStride(2, .{ .size = 102, .stride = 102 });
+    s2.setSizeAndStride(3, .{ .size = 103, .stride = 103 });
+    s2.setSizeAndStride(4, .{ .size = 104, .stride = 104 });
 
-    try std.testing.expect(SegmentedStorage(5).capacity() == 10);
-    try std.testing.expect(SegmentedStorage(5).capacity() == 10);
-    try std.testing.expect(SegmentedStorage(5).segmentSize() == 5);
-    try std.testing.expect(SegmentedStorage(5).segmentSize() == 5);
+    try std.testing.expect(SizesAndStrides(5).capacity() == 10);
+    try std.testing.expect(SizesAndStrides(5).capacity() == 10);
+    try std.testing.expect(SizesAndStrides(5).segmentSize() == 5);
+    try std.testing.expect(SizesAndStrides(5).segmentSize() == 5);
 
-    try std.testing.expect(s1.getLower(0) == s2.getLower(0));
-    try std.testing.expect(s1.getLower(1) == s2.getLower(1));
-    try std.testing.expect(s1.getLower(2) == s2.getLower(2));
-    try std.testing.expect(s1.getLower(3) == s2.getLower(3));
-    try std.testing.expect(s1.getLower(4) == s2.getLower(4));
+    try std.testing.expect(s1.getSize(0) == s2.getSize(0));
+    try std.testing.expect(s1.getSize(1) == s2.getSize(1));
+    try std.testing.expect(s1.getSize(2) == s2.getSize(2));
+    try std.testing.expect(s1.getSize(3) == s2.getSize(3));
+    try std.testing.expect(s1.getSize(4) == s2.getSize(4));
 
-    try std.testing.expect(s1.getUpper(0) == s2.getUpper(0));
-    try std.testing.expect(s1.getUpper(1) == s2.getUpper(1));
-    try std.testing.expect(s1.getUpper(2) == s2.getUpper(2));
-    try std.testing.expect(s1.getUpper(3) == s2.getUpper(3));
-    try std.testing.expect(s1.getUpper(4) == s2.getUpper(4));
+    try std.testing.expect(s1.getStride(0) == s2.getStride(0));
+    try std.testing.expect(s1.getStride(1) == s2.getStride(1));
+    try std.testing.expect(s1.getStride(2) == s2.getStride(2));
+    try std.testing.expect(s1.getStride(3) == s2.getStride(3));
+    try std.testing.expect(s1.getStride(4) == s2.getStride(4));
 }
 
 test "Slicing" {
 
     const std = @import("std");
 
-    var s1 = SegmentedStorage(3).init([_]SegmentPair{
-            .{ .lower = 100, .upper = 200 },
-            .{ .lower = 101, .upper = 201 },
-            .{ .lower = 102, .upper = 202 },
+    var s1 = SizesAndStrides(3).init([_]SizeAndStride{
+            .{ .size = 100, .stride = 200 },
+            .{ .size = 101, .stride = 201 },
+            .{ .size = 102, .stride = 202 },
         });
 
-    { // test lower slice
-        const slice = s1.sliceLower();
+    { // test size slice
+        const slice = s1.sliceSizes();
         try std.testing.expect(slice.len == 3);
         try std.testing.expect(slice[0] == 100);
         try std.testing.expect(slice[1] == 101);
         try std.testing.expect(slice[2] == 102);
     }
-    { // test upper slice
-        const slice = s1.sliceUpper();
+    { // test stride slice
+        const slice = s1.sliceStrides();
         try std.testing.expect(slice.len == 3);
         try std.testing.expect(slice[0] == 200);
         try std.testing.expect(slice[1] == 201);
@@ -192,15 +184,15 @@ test "Copying" {
 
     const std = @import("std");
 
-    var s1 = SegmentedStorage(5).init([_]SegmentPair{
-            .{ .lower = 100, .upper = 100 },
-            .{ .lower = 101, .upper = 101 },
-            .{ .lower = 102, .upper = 102 },
-            .{ .lower = 103, .upper = 103 },
-            .{ .lower = 104, .upper = 104 },
+    var s1 = SizesAndStrides(5).init([_]SizeAndStride{
+            .{ .size = 100, .stride = 100 },
+            .{ .size = 101, .stride = 101 },
+            .{ .size = 102, .stride = 102 },
+            .{ .size = 103, .stride = 103 },
+            .{ .size = 104, .stride = 104 },
         });
 
-    var s2 = SegmentedStorage(5).init(null);
+    var s2 = SizesAndStrides(5).init(null);
 
     s2.copyFrom(&s1);
 
