@@ -20,18 +20,6 @@
 // file dedicated to that exact job. It is very important that we do not cross
 // responsibilities in this system.
 
-                // ACCESSING TENSOR DATA AND ELEMENTS //
-
-// Tensors, in this system, should not to be mistaken for arrays. Arrays do allow a user
-// to access individual elements and modify them. Tensors (for our purpose) are meant
-// to be used to manipulate data at a batch level. If a user wants to manipulate an
-// individual element, they certainly can by simply using the underlying memory array
-// that a tensor is currently viewing.
-
-// Broadly speaking, the handling of individual elements will be done by algorithms
-// that work at the scope of tensors. Because of this, Zein should supply a varienty
-// of robust batch level operations that allow for these manipulations.
-
                 // TENSORS AS THEY RELATE TO ARRAYS //
 
 // Because of the design descisions outlined above, users should be able to easily
@@ -109,10 +97,10 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) 
 inline fn computeTensorIndex(
     comptime rank: usize,
     comptime value_type: type, 
-    strides: *const [rank * 2]u32,
+    strides: *const [rank]u32,
     indices: [rank]u32) u32 {
     const i : @Vector(rank, value_type) = indices;
-    const s : @Vector(rank, value_type) = strides.*[rank..].*;
+    const s : @Vector(rank, value_type) = strides.*;
     return @reduce(ReduceOp.Add, s * i);
 }
 
@@ -147,7 +135,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
         const ConstSelfPtr = *const Self;
 
-        value_slice : ValueSlice,
+        values : ValueSlice,
         sizes_and_strides : SizesAndStridesType,
 
         pub fn init(
@@ -155,23 +143,23 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             sizes : ?[Rank]u32,
         ) Self {
             return Self {
-                .value_slice = if (values) |vs| (vs) else &[_]ValueType{},
+                .values = if (values) |vs| (vs) else &[_]ValueType{},
                 .sizes_and_strides = SizesAndStridesType.init(sizes),
             };
         }
 
         pub fn getSizes(self: ConstSelfPtr) [] const u32 {
-            return self.*.sizes_and_strides.sliceSizes();
+            return &self.*.sizes_and_strides.sizes;
         }
         pub fn getStrides(self: ConstSelfPtr) [] const u32 {
-            return self.*.sizes_and_strides.sliceStrides();
+            return &self.*.sizes_and_strides.strides;
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
             return sliceProduct(self.*.getSizes());
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
-            return self.*.value_slice.len;
+            return self.*.values.len;
         }
 
         pub fn atCapacity(self: ConstSelfPtr) bool {
@@ -189,15 +177,15 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // to use this function safely, check that both slice lenghts are
         // the same and that the capacity is equal to the value length
         pub fn setValuesUnchecked(self: SelfPtr, values: ValueSlice) void {
-            self.*.value_slice = values;
+            self.*.values = values;
         }
 
         // to use this function safely, check that both tensor value
         // sizes are the same and that both tensors are at capacity
         pub fn swapValuesUnchecked(self: SelfPtr, other: SelfPtr) void {
-            var tmp = self.*.value_slice;
-            self.*.value_slice = other.*.value_slice;
-            other.*.value_slice = tmp;
+            var tmp = self.*.values;
+            self.*.values = other.*.values;
+            other.*.values = tmp;
         }
 
         // to use this function safely, check that the both tensors are at capacity
@@ -222,17 +210,17 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // to use this function safely, ensure that no indices are out of bounds
         fn getValueUnchecked(self: ConstSelfPtr, indices: [rank]u32) u32 {
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
-            return self.*.value_slice[n];
+            return self.*.values[n];
         }
 
         // to use this function safely, ensure that no indices are out of bounds
         fn setValueUnchecked(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
-            self.*.value_slice[n] = value;
+            self.*.values[n] = value;
         }
 
         ///////////////////////////////////////
@@ -298,12 +286,12 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             // function. Because of this, the at function will simply
             // call for program termination for invalid memory access.
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
             if (self.*.valueSize() <= n) {
                 exitProgram(1);
             }
-            return self.*.value_slice[n];
+            return self.*.values[n];
         }
 
         fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
@@ -313,12 +301,12 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             // function. Because of this, the at function will simply
             // call for program termination for invalid memory access.
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
             if (self.*.valueSize() <= n) {
                 exitProgram(1);
             }
-            self.*.value_slice[n] = value;
+            self.*.values[n] = value;
         }
 
         pub fn permutate(self: SelfPtr, permutation: [rank]SizeAndStride.ValueType) !void {
