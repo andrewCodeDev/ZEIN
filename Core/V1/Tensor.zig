@@ -67,17 +67,17 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
 
     return struct {
 
-        const Rank = rank;
+        pub const Rank = rank;
 
-        const ValueType = value_type;
+        pub const ValueType = value_type;
 
-        const ValueSlice = []ValueType;
+        pub const ValueSlice = []ValueType;
 
         const Self = @This();
 
         const SelfPtr = *Self;
 
-        const ConstSelfPtr = * const Self;
+        const ConstSelfPtr = *const Self;
 
         value_slice : ValueSlice,
         sizes_and_strides : SizesAndStrides(Rank),
