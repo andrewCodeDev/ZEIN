@@ -44,25 +44,6 @@ pub const SizeAndStride = struct {
 ///////////////////////////////////////////////////////
 // Split SizeAndStrides into a contiguous segmented array
 
-fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
-   // this is a hack because init will cause an error
-   // if we don't return the struct type directly    
-    var memory: [n * 2]u32 = undefined;
-
-    if (pairs) |data| 
-    {
-        var i: usize = 0;
-        while(i < n) : (i += 1) {                        
-            memory[i]     = data[i].size;            
-            memory[i + n] = data[i].stride;
-        }
-    }
-    else {
-        @memset(&memory, 0); // zero seems like a sensible default...
-    }
-    return memory;
-}
-
  pub fn inferStridesFromSizes(
         comptime rank: usize, 
         comptime order: OrderType,
@@ -112,8 +93,7 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
 
     else {
         @memset(&memory, 0); // zero seems like a sensible default...
-    }
-    
+    }    
     return memory;
  }
 
