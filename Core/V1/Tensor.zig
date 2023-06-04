@@ -103,7 +103,7 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) 
     }
     checked += is_zero;
     
-    return (checked < limit) and (@popCount(checked) == rank);
+    return (checked < limit) and @popCount(checked) == rank;
 }
 
 inline fn computeTensorIndex(
@@ -121,7 +121,7 @@ inline fn computeTensorIndex(
 
 pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: OrderType) type {
 
-    if(64 <= rank){
+    if(63 < rank){
         @compileError("Tensors of rank 64 or greater are not supported.");
     }
 
