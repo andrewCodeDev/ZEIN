@@ -180,8 +180,8 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         }
 
         // to use this function safely, check that each axis index is present
-        pub fn transposeUnchecked(self: SelfPtr, permutation: [Rank]u32) void {
-            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, &permutation);
+        pub fn transposeUnchecked(self: SelfPtr, permutation: [] const SizeAndStride.ValueType) void {
+            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, permutation);
         }
 
         ///////////////////////////////////////
@@ -248,7 +248,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
             if(Rank != permutation.len){
                 return false;
             }
-            if(!checkBitwisePermutation(Rank, &permutation)){
+            if(!checkBitwisePermutation(Rank, permutation)){
                 return false;
             }
             Transpose.transposeInput(Rank, &self.*.sizes_and_strides, &permutation);
