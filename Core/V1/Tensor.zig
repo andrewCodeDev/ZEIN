@@ -148,10 +148,10 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             };
         }
 
-        pub fn sliceSizes(self: ConstSelfPtr) [] const u32 {
+        pub fn sliceSizes(self: ConstSelfPtr) [] const SizeAndStride.ValueType {
             return &self.*.sizes_and_strides.sizes;
         }
-        pub fn sliceStrides(self: ConstSelfPtr) [] const u32 {
+        pub fn sliceStrides(self: ConstSelfPtr) [] const SizeAndStride.ValueType {
             return &self.*.sizes_and_strides.strides;
         }
         
