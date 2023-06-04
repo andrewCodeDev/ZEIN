@@ -30,7 +30,7 @@ pub fn transposeToOutput(
     y_d: *[] data_type_y,
     y_s: *SizesAndStrides(rank_y),
     // output permutation of axis
-    permutation: * const [rank_x]u32
+    permutation: [] const SizesAndStrides.Valuetype
 ) void {
     // todo - consider enabling casting for the case of
     // producing a new tensor? Could be a good idea,
