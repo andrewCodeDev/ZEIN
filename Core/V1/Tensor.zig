@@ -179,7 +179,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
             self.*.swapSizesAndStridesUnchecked(other);
         }
 
-        // to use this function safely, check that each axis index is present
+        // to use this function safely, check that each index from 0..Rank is present
         pub fn transposeUnchecked(self: SelfPtr, permutation: [] const SizeAndStride.ValueType) void {
             Transpose.transposeInput(Rank, &self.*.sizes_and_strides, permutation);
         }
