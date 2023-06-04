@@ -97,8 +97,8 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) 
 inline fn computeTensorIndex(
     comptime rank: usize,
     comptime value_type: type, 
-    strides: *const [rank]u32,
-    indices: [rank]u32) u32 {
+    strides: *const [rank]SizeAndStride.ValueType,
+    indices: [rank]SizeAndStride.ValueType) SizeAndStride.ValueType {
     const i : @Vector(rank, value_type) = indices;
     const s : @Vector(rank, value_type) = strides.*;
     return @reduce(ReduceOp.Add, s * i);
@@ -156,7 +156,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
-            return sliceProduct(self.*.getSizes());
+            return sliceProduct(self.*.sliceSizes());
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
             return self.*.values.len;
@@ -264,7 +264,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 return TensorError.CapacityMismatch;
             }
             // check that both tensors are at capacity without additional computation
-            if(self.*.ValueSize() != capacity_a  or other.*.ValueSize() != capacity_b) {
+            if(self.*.valueSize() != capacity_a  or other.*.valueSize() != capacity_b) {
                 return TensorError.SizeAndCapacityMismatch;
             }
             self.*.swapSizesAndStridesUnchecked(other);
@@ -347,12 +347,13 @@ test "Bitwise-Permutation" {
     try expect(!checkBitwisePermutation(3, &.{ 0, 1, 0 }));
     try expect(!checkBitwisePermutation(3, &.{ 0, 2, 6 }));
     try expect(!checkBitwisePermutation(3, &.{ 0, 0, 0 }));
+    try expect(!checkBitwisePermutation(3, &.{ 1, 1, 1 }));
     try expect(!checkBitwisePermutation(3, &.{ 6, 7, 8 }));
     try expect(!checkBitwisePermutation(3, &.{ 1, 2, 2 }));
     try expect(!checkBitwisePermutation(3, &.{ 1, 2, 3 }));
 }
 
-test "Tensor at function" {
+test "Tensor Transpose" {
     const expect = @import("std").testing.expect;
 
     var data = [9]i32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
