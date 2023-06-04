@@ -97,8 +97,8 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) 
 inline fn computeTensorIndex(
     comptime rank: usize,
     comptime value_type: type, 
-    strides: *const [rank]SizeAndStride.ValueType,
-    indices: [rank]SizeAndStride.ValueType) SizeAndStride.ValueType {
+    strides: *const [rank]value_type,
+    indices: [rank]value_type) value_type {
     const i : @Vector(rank, value_type) = indices;
     const s : @Vector(rank, value_type) = strides.*;
     return @reduce(ReduceOp.Add, s * i);
