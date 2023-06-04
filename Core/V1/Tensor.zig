@@ -49,13 +49,27 @@
 // focused on integer and floating point numbers. User provided types will have to
 // be reviewed as time goes forward.
 
+// STD import files...
+const exitProgram = @import("std").os.exit;
+const ReduceOp = @import("std").builtin.ReduceOp;
+
+// Zein import files...
 pub const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
-
 pub const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
+const OrderType = @import("SizesAndStrides.zig").OrderType;
+const Rowwise = @import("SizesAndStrides.zig").Rowwise;
+const Colwise = @import("SizesAndStrides.zig").Colwise;
 
-const Transpose = @import("Transpose.zig");
+const Permutate = @import("Permutate.zig");
 
-// more imports coming soon as they are implemented...
+// Tensor Utilities...
+const TensorError = error {
+    SizeAndCapacityMismatch,
+    InvalidPermutation,
+    AllocSizeMismatch,
+    CapacityMismatch,
+    RankMismatch
+};
 
 fn sliceProduct(slice: [] const SizeAndStride.ValueType) SizeAndStride.ValueType {
     var total: SizeAndStride.ValueType = 1;
@@ -92,19 +106,40 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) 
     return (checked < limit) and (@popCount(checked) == rank);
 }
 
-pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
+inline fn computeTensorIndex(
+    comptime rank: usize,
+    comptime value_type: type, 
+    strides: *const [rank * 2]u32,
+    indices: [rank]u32) u32 {
+    const i : @Vector(rank, value_type) = indices;
+    const s : @Vector(rank, value_type) = strides.*[rank..].*;
+    return @reduce(ReduceOp.Add, s * i);
+}
+
+///////////////////////////
+// Tensor Implementation //
+
+pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: OrderType) type {
 
     if(64 <= rank){
         @compileError("Tensors of rank 64 or greater are not supported.");
+    }
+
+    if(0 == rank){
+        @compileError("Tensors of rank zero are not supported.");
     }
 
     return struct {
 
         pub const Rank = rank;
 
+        pub const Order = order;
+
         pub const ValueType = value_type;
 
         pub const ValueSlice = []ValueType;
+
+        pub const SizesAndStridesType = SizesAndStrides(Rank, Order);
 
         const Self = @This();
 
@@ -113,15 +148,15 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         const ConstSelfPtr = *const Self;
 
         value_slice : ValueSlice,
-        sizes_and_strides : SizesAndStrides(Rank),
+        sizes_and_strides : SizesAndStridesType,
 
         pub fn init(
-            value_slice: ?ValueSlice,
-            sizes_and_strides: ?[Rank]SizeAndStride,
+            values: ?ValueSlice,
+            sizes : ?[Rank]u32,
         ) Self {
             return Self {
-                .value_slice = if (value_slice) |vs| (vs) else &[_]ValueType{},
-                .sizes_and_strides = SizesAndStrides(Rank).init(sizes_and_strides),
+                .value_slice = if (values) |vs| (vs) else &[_]ValueType{},
+                .sizes_and_strides = SizesAndStridesType.init(sizes),
             };
         }
 
@@ -174,14 +209,30 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         }
 
         // to use this function safely, check that both tensors are at capacity
-        pub fn swapTensorsUnchecked(self: SelfPtr, other: SelfPtr) void {
+        pub fn swapUnchecked(self: SelfPtr, other: SelfPtr) void {
             self.*.swapValuesUnchecked(other);
             self.*.swapSizesAndStridesUnchecked(other);
         }
 
         // to use this function safely, check that each index from 0..Rank is present
-        pub fn transposeUnchecked(self: SelfPtr, permutation: [] const SizeAndStride.ValueType) void {
-            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, permutation);
+        pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizeAndStride.ValueType) void {
+            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, permutation);
+        }
+
+        // to use this function safely, ensure that no indices are out of bounds
+        fn getValueUnchecked(self: ConstSelfPtr, indices: [rank]u32) u32 {
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+            );
+            return self.*.value_slice[n];
+        }
+
+        // to use this function safely, ensure that no indices are out of bounds
+        fn setValueUnchecked(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+            );
+            self.*.value_slice[n] = value;
         }
 
         ///////////////////////////////////////
@@ -192,67 +243,90 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         // perform the operation. This is to prevent leaving
         // tensors in an invalid state after the operation.
 
-        pub fn setValuesChecked(self: SelfPtr, values: ValueSlice) bool {
+        pub fn setValues(self: SelfPtr, values: ValueSlice) bool {
             // to assure that sizes and strides are not
             // invalidated, we check size and capacity
             if(self.*.valueCapacity() != values.len){
-                return false;
+                return TensorError.AllocSizeMismatch;
             }
             self.*.setValuesUnchecked(self, values);
             return true;
         }
 
-        pub fn swapValuesChecked(self: SelfPtr, other: SelfPtr) bool {
+        pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
             // to assure that sizes and strides are not
             // invalidated, we check size and capacity
             if(self.*.valueSize() != other.*.valueSize()){
-                return false;
+                return TensorError.AllocSizeMismatch;
             }
             if(!self.*.atCapacity() or !other.*.atCapacity()) {
-                return false;
+                return TensorError.SizeAndCapacityMismatch;
             }
             self.*.swapValuesUnchecked(other);
-            return true;
         }
 
-        pub fn swapSizesAndStridesChecked(self: SelfPtr, other: SelfPtr) bool {
+        pub fn swapSizesAndStrides(self: SelfPtr, other: SelfPtr) !void {
             // we only want to compute these once...
             const capacity_a = self.valueCapactiy();
             const capacity_b = other.valueCapactiy();
 
             // tensors can have different SizesAndStrides
             // and still share the total value capcity
-            if(capacity_a != capacity_b){
-                return false;
+            if(capacity_b != capacity_b){
+                return TensorError.CapacityMismatch;
             }
             // check that both tensors are at capacity without additional computation
             if(self.*.ValueSize() != capacity_a  or other.*.ValueSize() != capacity_b) {
-                return false;
+                return TensorError.SizeAndCapacityMismatch;
             }
             self.*.swapSizesAndStridesUnchecked(other);
-            return true;
         }
 
-        pub fn swapTensorsChecked(self: SelfPtr, other: SelfPtr) bool {
+        pub fn swap(self: SelfPtr, other: SelfPtr) !void {
             // Two tensors do not need to be the same size to be
             // swapped, we require that they are both at capcity
             if(!self.*.atCapacity() or !other.*.atCapacity()) {
-                return false;
+                return TensorError.SizeAndCapacityMismatch;
             }
-            self.*.swapTensorsUnchecked(other);
-            return true;
+            self.*.swapUnchecked(other);
         }
 
-        pub fn transposeChecked(self: SelfPtr, permutation: [] const SizeAndStride.Valuetype) bool {
+        fn getValue(self: ConstSelfPtr, indices: [rank]u32) ValueType {
+            // We find ourselves at a difficult decision to make...
+            // How to handle this error? It is too cumbersome to check
+            // a return type for an error and make serious use of this
+            // function. Because of this, the at function will simply
+            // call for program termination for invalid memory access.
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+            );
+            if (self.*.valueSize() <= n) {
+                exitProgram(1);
+            }
+            return self.*.value_slice[n];
+        }
+
+        fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
+            // We find ourselves at a difficult decision to make...
+            // How to handle this error? It is too cumbersome to check
+            // a return type for an error and make serious use of this
+            // function. Because of this, the at function will simply
+            // call for program termination for invalid memory access.
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.sizes_and_strides.memory, indices
+            );
+            if (self.*.valueSize() <= n) {
+                exitProgram(1);
+            }
+            self.*.value_slice[n] = value;
+        }
+
+        pub fn permutate(self: SelfPtr, permutation: [rank]SizeAndStride.ValueType) !void {
             // check that all indices are accounted for
-            if(Rank != permutation.len){
-                return false;
+            if(!checkBitwisePermutation(Rank, &permutation)){
+                return TensorError.InvalidPermutation;
             }
-            if(!checkBitwisePermutation(Rank, permutation)){
-                return false;
-            }
-            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, &permutation);
-            return true;
+            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
         }
     };
 }
@@ -261,11 +335,9 @@ test "Initialization" {
 
     const expect = @import("std").testing.expect;
 
-    var x = Tensor(u32, 3).init(null, [_]SizeAndStride{
-        .{ .size = 10, .stride = 10 },
-        .{ .size = 20, .stride = 20 },
-        .{ .size = 30, .stride = 30 }
-    });
+    var x = Tensor(u32, 3, Rowwise).init(
+            null, .{ 10, 20, 30 }
+        );    
 
     const total: usize = 10 * 20 * 30;
 
@@ -290,4 +362,36 @@ test "Bitwise-Permutation" {
     try expect(!checkBitwisePermutation(3, &.{ 6, 7, 8 }));
     try expect(!checkBitwisePermutation(3, &.{ 1, 2, 2 }));
     try expect(!checkBitwisePermutation(3, &.{ 1, 2, 3 }));
+}
+
+test "Tensor at function" {
+    const expect = @import("std").testing.expect;
+
+    var data = [9]i32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+    var x = Tensor(i32, 2, Rowwise).init(
+            &data, .{ 3, 3 }
+        );    
+
+    try expect(x.getValue(.{0,0}) == 1);
+    try expect(x.getValue(.{0,1}) == 2);
+    try expect(x.getValue(.{0,2}) == 3);
+    try expect(x.getValue(.{1,0}) == 4);
+    try expect(x.getValue(.{1,1}) == 5);
+    try expect(x.getValue(.{1,2}) == 6);
+    try expect(x.getValue(.{2,0}) == 7);
+    try expect(x.getValue(.{2,1}) == 8);
+    try expect(x.getValue(.{2,2}) == 9);
+
+    try x.permutate(.{1, 0});
+
+    try expect(x.getValue(.{0,0}) == 1);
+    try expect(x.getValue(.{0,1}) == 4);
+    try expect(x.getValue(.{0,2}) == 7);
+    try expect(x.getValue(.{1,0}) == 2);
+    try expect(x.getValue(.{1,1}) == 5);
+    try expect(x.getValue(.{1,2}) == 8);
+    try expect(x.getValue(.{2,0}) == 3);
+    try expect(x.getValue(.{2,1}) == 6);
+    try expect(x.getValue(.{2,2}) == 9);
 }

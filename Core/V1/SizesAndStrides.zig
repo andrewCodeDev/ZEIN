@@ -27,6 +27,14 @@
 // a generic pair class instead of this, because I
 // forsee some tedious converions in the future.
 
+pub const OrderType = enum {
+    rowwise,
+    colwise,
+};
+
+pub const Rowwise = OrderType.rowwise;
+pub const Colwise = OrderType.colwise;
+
 pub const SizeAndStride = struct {
     pub const ValueType = u32;
     size : ValueType = 0,
@@ -55,12 +63,70 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
     return memory;
 }
 
+ pub fn inferStridesFromSizes(
+        comptime rank: usize, 
+        comptime order: OrderType,
+        sizes: ?[rank]SizeAndStride.ValueType
+    ) [rank * 2]SizeAndStride.ValueType {
+
+    const full = rank * 2;
+    
+    var memory : [full]SizeAndStride.ValueType = undefined;
+
+    if(sizes) |data| { 
+        if (order == OrderType.rowwise) {
+                
+            // the farthest right element needs to have a stride of one
+            memory[rank - 1] = data[rank - 1];
+            memory[full - 1] = 1;
+
+            // all of the other elements step stride over the next size up
+            var i: usize = rank - 1;
+            var j: usize = full - 1;
+
+            while(0 < i) {
+                i -= 1;
+                j -= 1;
+                memory[i] = data[i];
+                memory[j] = data[i + 1];
+            }
+        }
+
+        else {
+            // the farthest left element needs to have a stride of one
+            memory[0] = data[0];
+            memory[rank] = 1;
+
+            // all of the other elements step stride over the next size up
+            var i: usize = 0;
+            var j: usize = rank;
+
+            while(i < rank) {
+                i += 1;
+                j += 1;
+                memory[i] = data[i];
+                memory[j] = data[i - 1];
+            }
+        }
+    }
+
+    else {
+        @memset(&memory, 0); // zero seems like a sensible default...
+    }
+    
+    return memory;
+ }
+
 /////////////////////////////////////////
 // SizesAndStrides Struct Implementation 
 
- pub fn SizesAndStrides(comptime pair_count: usize) type {
+ pub fn SizesAndStrides(comptime rank: usize, comptime order: OrderType) type {
 
     return struct {
+
+        const Rank = rank;
+
+        const Order = order;
 
         const Self = @This();
 
@@ -70,12 +136,11 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
 
         pub const ValueType = SizeAndStride.ValueType;
     
-        memory: [pair_count * 2]u32 = undefined,
+        memory: [Rank * 2]u32 = undefined,
     
-        // init SizesAndStrides from an optional pair array
-        pub fn init(pairs: ?[pair_count]SizeAndStride) Self {
+        pub fn init(sizes: ?[Rank]ValueType) Self {
             return Self {
-                .memory = initSizesAndStrides(pair_count, pairs),
+                .memory = inferStridesFromSizes(Rank, Order, sizes),
             };
         }
         
@@ -84,7 +149,7 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
             return self.memory[i];
         }
         pub fn getStride(self: Self, i: usize) u32 {
-            return self.memory[pair_count + i];
+            return self.memory[Rank + i];
         }
     
         //// segemented index setters
@@ -92,7 +157,7 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
             self.*.memory[i] = value;
         }
         pub fn setStride(self: SelfPtr, i: usize, value: u32) void {
-            self.*.memory[pair_count + i] = value;
+            self.*.memory[Rank + i] = value;
         }
     
         //// pairwise setters/getter
@@ -106,18 +171,18 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
 
         //// segmented slicing functions
         pub fn sliceSizes(self: ConstSelfPtr) [] const u32 {
-            return self.*.memory[0..pair_count];
+            return self.*.memory[0..Rank];
         }
         pub fn sliceStrides(self: ConstSelfPtr) [] const u32 {
-            return self.*.memory[pair_count..pair_count * 2];
+            return self.*.memory[Rank..Rank * 2];
         }    
 
         // type sizes... member functions instead?
         pub fn segmentSize() usize {
-            return pair_count;
+            return Rank;
         }
         pub fn capacity() usize {
-            return pair_count * 2;
+            return Rank * 2;
         }
     };
 }
@@ -128,26 +193,22 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
 test "Initialization" {
     const std = @import("std");
 
-    var s1 = SizesAndStrides(5).init([_]SizeAndStride{
-            .{ .size = 100, .stride = 100 },
-            .{ .size = 101, .stride = 101 },
-            .{ .size = 102, .stride = 102 },
-            .{ .size = 103, .stride = 103 },
-            .{ .size = 104, .stride = 104 },
-        });
+    var s1 = SizesAndStrides(5, Rowwise).init(
+            .{ 100, 101, 102, 103, 104, }
+        );
 
-    var s2 = SizesAndStrides(5).init(null);
+    var s2 = SizesAndStrides(5, Rowwise).init(null);
 
-    s2.setSizeAndStride(0, .{ .size = 100, .stride = 100 });
-    s2.setSizeAndStride(1, .{ .size = 101, .stride = 101 });
-    s2.setSizeAndStride(2, .{ .size = 102, .stride = 102 });
-    s2.setSizeAndStride(3, .{ .size = 103, .stride = 103 });
-    s2.setSizeAndStride(4, .{ .size = 104, .stride = 104 });
+    s2.setSizeAndStride(0, .{ .size = 100, .stride = 101 });
+    s2.setSizeAndStride(1, .{ .size = 101, .stride = 102 });
+    s2.setSizeAndStride(2, .{ .size = 102, .stride = 103 });
+    s2.setSizeAndStride(3, .{ .size = 103, .stride = 104 });
+    s2.setSizeAndStride(4, .{ .size = 104, .stride =   1 });
 
-    try std.testing.expect(SizesAndStrides(5).capacity() == 10);
-    try std.testing.expect(SizesAndStrides(5).capacity() == 10);
-    try std.testing.expect(SizesAndStrides(5).segmentSize() == 5);
-    try std.testing.expect(SizesAndStrides(5).segmentSize() == 5);
+    try std.testing.expect(SizesAndStrides(5, Rowwise).capacity() == 10);
+    try std.testing.expect(SizesAndStrides(5, Rowwise).capacity() == 10);
+    try std.testing.expect(SizesAndStrides(5, Rowwise).segmentSize() == 5);
+    try std.testing.expect(SizesAndStrides(5, Rowwise).segmentSize() == 5);
 
     try std.testing.expect(s1.getSize(0) == s2.getSize(0));
     try std.testing.expect(s1.getSize(1) == s2.getSize(1));
@@ -166,11 +227,7 @@ test "Slicing" {
 
     const std = @import("std");
 
-    var s1 = SizesAndStrides(3).init([_]SizeAndStride{
-            .{ .size = 100, .stride = 200 },
-            .{ .size = 101, .stride = 201 },
-            .{ .size = 102, .stride = 202 },
-        });
+    var s1 = SizesAndStrides(3, Rowwise).init(.{ 100, 101, 102, });
 
     { // test size slice
         const slice = s1.sliceSizes();
@@ -182,8 +239,8 @@ test "Slicing" {
     { // test stride slice
         const slice = s1.sliceStrides();
         try std.testing.expect(slice.len == 3);
-        try std.testing.expect(slice[0] == 200);
-        try std.testing.expect(slice[1] == 201);
-        try std.testing.expect(slice[2] == 202);
+        try std.testing.expect(slice[0] == 101);
+        try std.testing.expect(slice[1] == 102);
+        try std.testing.expect(slice[2] ==   1);
     }    
 }
