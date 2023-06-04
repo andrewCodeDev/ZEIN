@@ -208,7 +208,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         }
 
         // to use this function safely, ensure that no indices are out of bounds
-        fn getValueUnchecked(self: ConstSelfPtr, indices: [rank]u32) u32 {
+        fn getValueUnchecked(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
             const n = computeTensorIndex(
                 Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
@@ -279,7 +279,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             self.*.swapUnchecked(other);
         }
 
-        fn getValue(self: ConstSelfPtr, indices: [rank]u32) ValueType {
+        fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
             // We find ourselves at a difficult decision to make...
             // How to handle this error? It is too cumbersome to check
             // a return type for an error and make serious use of this
