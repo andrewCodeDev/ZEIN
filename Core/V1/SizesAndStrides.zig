@@ -110,12 +110,8 @@ fn initSizesAndStrides(comptime n: usize, pairs: ?[n]SizeAndStride) [n * 2]u32 {
         }
         pub fn sliceStrides(self: ConstSelfPtr) [] const u32 {
             return self.*.memory[pair_count..pair_count * 2];
-        }
-    
-        pub fn copyFrom(self: SelfPtr, other: ConstSelfPtr) void {
-            @memcpy(&self.*.memory, &other.*.memory);        
-        }
-    
+        }    
+
         // type sizes... member functions instead?
         pub fn segmentSize() usize {
             return pair_count;
@@ -190,25 +186,4 @@ test "Slicing" {
         try std.testing.expect(slice[1] == 201);
         try std.testing.expect(slice[2] == 202);
     }    
-}
-
-test "Copying" {
-
-    const std = @import("std");
-
-    var s1 = SizesAndStrides(5).init([_]SizeAndStride{
-            .{ .size = 100, .stride = 100 },
-            .{ .size = 101, .stride = 101 },
-            .{ .size = 102, .stride = 102 },
-            .{ .size = 103, .stride = 103 },
-            .{ .size = 104, .stride = 104 },
-        });
-
-    var s2 = SizesAndStrides(5).init(null);
-
-    s2.copyFrom(&s1);
-
-    for(s1.memory, s2.memory) |i, j| {
-        try std.testing.expect(i == j);
-    }
 }

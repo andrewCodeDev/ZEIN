@@ -53,17 +53,50 @@ pub const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
 
 pub const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
 
+const Transpose = @import("Transpose.zig");
+
 // more imports coming soon as they are implemented...
 
-fn sliceProduct(comptime T: type, slice: [] const T) T {
-    var total: T = 1;
+fn sliceProduct(slice: [] const SizeAndStride.ValueType) SizeAndStride.ValueType {
+    var total: SizeAndStride.ValueType = 1;
     for(slice) |n| { 
         total *= n;
     }
-    return total;    
+    return total * @boolToInt(0 < slice.len);
+}
+
+fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) bool {
+    // O(N) operation to check for valid permutations.
+
+    // All indices of the SizesAndStrides must be
+    // checked before we can permutate. Otherwise,
+    // this could mean that a transpose operation
+    // could leave a tensor in an invalid state.
+
+    // bitwise limit to check if an index is out of bounds
+    const limit: usize = ((rank + 1) << 1);
+
+    // storage for bitwise OR operations checks
+    var checked: usize = 0;
+
+    // bit shifting zero by one is a no-op
+    // this is a work-around for indexing
+    var is_zero: usize = 0;
+    
+    for(permutation.*) |i| { 
+        checked |= (i << 1); 
+        is_zero |= @boolToInt((i == 0));
+    }
+    checked += is_zero;
+    
+    return (checked < limit) and (@popCount(checked) == rank);
 }
 
 pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
+
+    if(64 <= rank){
+        @compileError("Tensors of rank 64 or greater are not supported.");
+    }
 
     return struct {
 
@@ -100,7 +133,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
-            return sliceProduct(SizeAndStride.ValueType, self.*.getSizes());
+            return sliceProduct(self.*.getSizes());
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
             return self.*.value_slice.len;
@@ -144,6 +177,11 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
         pub fn swapTensorsUnchecked(self: SelfPtr, other: SelfPtr) void {
             self.*.swapValuesUnchecked(other);
             self.*.swapSizesAndStridesUnchecked(other);
+        }
+
+        // to use this function safely, check that each axis index is present
+        pub fn transposeUnchecked(self: SelfPtr, permutation: [Rank]u32) void {
+            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, &permutation);
         }
 
         ///////////////////////////////////////
@@ -204,6 +242,18 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize) type {
             self.*.swapTensorsUnchecked(other);
             return true;
         }
+
+        pub fn transposeChecked(self: SelfPtr, permutation: [] const SizeAndStride.Valuetype) bool {
+            // check that all indices are accounted for
+            if(Rank != permutation.len){
+                return false;
+            }
+            if(!checkBitwisePermutation(Rank, &permutation)){
+                return false;
+            }
+            Transpose.transposeInput(Rank, &self.*.sizes_and_strides, &permutation);
+            return true;
+        }
     };
 }
 
@@ -220,4 +270,24 @@ test "Initialization" {
     const total: usize = 10 * 20 * 30;
 
     try expect(total == x.valueCapacity());        
+}
+
+test "Bitwise-Permutation" {
+    const expect = @import("std").testing.expect;
+
+    // valid permutation checks...
+    try expect(checkBitwisePermutation(3, &.{ 0, 1, 2 }));
+    try expect(checkBitwisePermutation(3, &.{ 0, 2, 1 }));
+    try expect(checkBitwisePermutation(3, &.{ 1, 0, 2 }));
+    try expect(checkBitwisePermutation(3, &.{ 1, 2, 0 }));
+    try expect(checkBitwisePermutation(3, &.{ 2, 0, 1 }));
+    try expect(checkBitwisePermutation(3, &.{ 2, 1, 0 }));
+    
+    // invalid permutation checks...
+    try expect(!checkBitwisePermutation(3, &.{ 0, 1, 0 }));
+    try expect(!checkBitwisePermutation(3, &.{ 0, 2, 6 }));
+    try expect(!checkBitwisePermutation(3, &.{ 0, 0, 0 }));
+    try expect(!checkBitwisePermutation(3, &.{ 6, 7, 8 }));
+    try expect(!checkBitwisePermutation(3, &.{ 1, 2, 2 }));
+    try expect(!checkBitwisePermutation(3, &.{ 1, 2, 3 }));
 }
