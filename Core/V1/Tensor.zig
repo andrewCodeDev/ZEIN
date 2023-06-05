@@ -38,36 +38,34 @@
 // be reviewed as time goes forward.
 
 // STD import files...
-const exitProgram = @import("std").os.exit;
 const ReduceOp = @import("std").builtin.ReduceOp;
 
 // Zein import files...
 pub const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
 pub const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
 const OrderType = @import("SizesAndStrides.zig").OrderType;
-const Rowwise = @import("SizesAndStrides.zig").Rowwise;
-const Colwise = @import("SizesAndStrides.zig").Colwise;
+pub const Rowwise = @import("SizesAndStrides.zig").Rowwise;
+pub const Colwise = @import("SizesAndStrides.zig").Colwise;
 
 const Permutate = @import("Permutate.zig");
 
 // Tensor Utilities...
 const TensorError = error {
-    SizeAndCapacityMismatch,
+    InvlaidTensorLayout,
     InvalidPermutation,
     AllocSizeMismatch,
     CapacityMismatch,
     RankMismatch
 };
 
-fn sliceProduct(slice: [] const SizeAndStride.ValueType) SizeAndStride.ValueType {
-    var total: SizeAndStride.ValueType = 1;
-    for(slice) |n| { 
-        total *= n;
-    }
-    return total * @boolToInt(0 < slice.len);
+// Used to quickly compute integer products such as total tensor capacity.
+// This operation needs to be as fast so that safety checks are low-cost.
+fn integerProduct(comptime rank: usize, comptime value_type: type, ints: *const [rank]value_type) value_type {
+    const s : @Vector(rank,value_type) = ints.*;
+    return @reduce(ReduceOp.Mul, s);
 }
 
-fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]u32) bool {
+fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]SizeAndStride.ValueType) bool {
     // O(N) operation to check for valid permutations.
 
     // All indices of the SizesAndStrides must be
@@ -156,13 +154,25 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
-            return sliceProduct(self.*.sliceSizes());
+            return integerProduct(Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.sizes);
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
             return self.*.values.len;
         }
 
-        pub fn atCapacity(self: ConstSelfPtr) bool {
+        // This is a critical function that users should call
+        // before using their tensor for operations. This check 
+        // ensures that the sizes and strides will enable them
+        // to properly access all of the memory within their 
+        // tensor and not step overbounds with proper indexing.
+
+        // Default "checked" functions will call this implicity,
+        // but please understand that the getValue and setValue
+        // do not call this. There is a lengthy comment about
+        // that above them - suffice to say, use this check before
+        // indexing into your tensor!
+
+        pub fn isValid(self: ConstSelfPtr) bool {
             return self.*.valueSize() == self.*.valueCapacity();
         }
 
@@ -207,38 +217,21 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, permutation);
         }
 
-        // to use this function safely, ensure that no indices are out of bounds
-        fn getValueUnchecked(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
-            const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
-            );
-            return self.*.values[n];
-        }
-
-        // to use this function safely, ensure that no indices are out of bounds
-        fn setValueUnchecked(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
-            const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
-            );
-            self.*.values[n] = value;
-        }
-
         ///////////////////////////////////////
         // Checked Functions Implementations //
 
         // Checked functions only succeed if their guard clauses
-        // are true. Otherwise, they return false and do not
+        // are true. Otherwise, they return errors and do not
         // perform the operation. This is to prevent leaving
         // tensors in an invalid state after the operation.
 
-        pub fn setValues(self: SelfPtr, values: ValueSlice) bool {
+        pub fn setValues(self: SelfPtr, values: ValueSlice) !void {
             // to assure that sizes and strides are not
             // invalidated, we check size and capacity
             if(self.*.valueCapacity() != values.len){
                 return TensorError.AllocSizeMismatch;
             }
             self.*.setValuesUnchecked(self, values);
-            return true;
         }
 
         pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
@@ -247,8 +240,8 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             if(self.*.valueSize() != other.*.valueSize()){
                 return TensorError.AllocSizeMismatch;
             }
-            if(!self.*.atCapacity() or !other.*.atCapacity()) {
-                return TensorError.SizeAndCapacityMismatch;
+            if(!self.*.isValid() or !other.*.isValid()) {
+                return TensorError.InvlaidTensorLayout;
             }
             self.*.swapValuesUnchecked(other);
         }
@@ -265,48 +258,19 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             }
             // check that both tensors are at capacity without additional computation
             if(self.*.valueSize() != capacity_a  or other.*.valueSize() != capacity_b) {
-                return TensorError.SizeAndCapacityMismatch;
+                return TensorError.InvlaidTensorLayout;
             }
             self.*.swapSizesAndStridesUnchecked(other);
         }
 
         pub fn swap(self: SelfPtr, other: SelfPtr) !void {
-            // Two tensors do not need to be the same size to be
-            // swapped, we require that they are both at capcity
-            if(!self.*.atCapacity() or !other.*.atCapacity()) {
-                return TensorError.SizeAndCapacityMismatch;
+            // Two tensors do not need to be the same size to be swapped.
+            // They only need to both be valid tensors to prevent invalidation.
+
+            if(!self.*.isValid() or !other.*.isValid()) {
+                return TensorError.InvlaidTensorLayout;
             }
             self.*.swapUnchecked(other);
-        }
-
-        fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
-            // We find ourselves at a difficult decision to make...
-            // How to handle this error? It is too cumbersome to check
-            // a return type for an error and make serious use of this
-            // function. Because of this, the at function will simply
-            // call for program termination for invalid memory access.
-            const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
-            );
-            if (self.*.valueSize() <= n) {
-                exitProgram(1);
-            }
-            return self.*.values[n];
-        }
-
-        fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]u32) void {
-            // We find ourselves at a difficult decision to make...
-            // How to handle this error? It is too cumbersome to check
-            // a return type for an error and make serious use of this
-            // function. Because of this, the at function will simply
-            // call for program termination for invalid memory access.
-            const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
-            );
-            if (self.*.valueSize() <= n) {
-                exitProgram(1);
-            }
-            self.*.values[n] = value;
         }
 
         pub fn permutate(self: SelfPtr, permutation: [rank]SizeAndStride.ValueType) !void {
@@ -315,6 +279,47 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 return TensorError.InvalidPermutation;
             }
             Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
+        }
+
+        /////////////////////////////////////////////////
+        // !!! Value Getter and Setters are UNCHECKED !!!
+
+        // I debated with myself about having a Unchecked/Default version of
+        // these functions, but I can't justify the cost. Here's why...
+        // it is too cumbersome to put a "try" infront of these and will
+        // cause tensor expressions to be extremely awkward.
+
+        // I have rarely seen C++ implementations of tensors that use
+        // the std::vector::at function (which is range checked). Instead,
+        // almost everyone opts for the std::vector::operator[].
+        // This is because it's natural to write x[0] + y[0].
+
+        // Also, we could check *all kinds of things* here. For instance,
+        // are you at capacity? Even if you're not, you could have your
+        // strides zeroed out and a value.len == 0. Should we test for
+        // that too? Then, we could test that you are within range
+        // and that means each index is valid for each size axis. This is
+        // simply untenable. In practice, what that means is that everyone 
+        // will just use the unchecked function call instead (I know I would).
+        
+        // Due to this, it is critical that the user takes the (very common)
+        // burden of checking that their indices are within range. Atop that,
+        // the user should also call isValid before using their tensors
+        // to ensure that everything lines up before using a tensor to be
+        // certain that they are doing valid indexing.
+        
+        fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
+            );
+            return self.*.values[n];
+        }
+
+        fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizeAndStride.ValueType) void {
+            const n = computeTensorIndex(
+                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
+            );
+            self.*.values[n] = value;
         }
     };
 }
@@ -361,6 +366,8 @@ test "Tensor Transpose" {
     var x = Tensor(i32, 2, Rowwise).init(
             &data, .{ 3, 3 }
         );    
+
+    try expect(x.isValid());
 
     try expect(x.getValue(.{0,0}) == 1);
     try expect(x.getValue(.{0,1}) == 2);
