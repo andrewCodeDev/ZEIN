@@ -45,15 +45,15 @@ Using the TensorAllocator is easy and intuitive and designed to work with Tensor
 ```zig
 var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
 
-var factory = TensorAllocator(f32).init(GPA.allocator());
+var allocator = TensorAllocator(f32).init(GPA.allocator());
 
 var X = Tensor(f32, 2, Rowwise).init(
     null, .{ 10, 10 }
 );
 
-try factory.allocToTensor(&X); // alloc 100 elements...
+try allocator.allocToTensor(&X); // alloc 100 elements...
 
-factory.freeFromTensor(&X); // free and reset tensor...
+allocator.freeFromTensor(&X); // free and reset tensor...
 ```
 
 # Memory owernship and viewership
