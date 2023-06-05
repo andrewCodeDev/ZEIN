@@ -19,7 +19,7 @@ const Allocator = @import("std").mem.Allocator;
 
 const Tensor = @import("Tensor.zig").Tensor;
 
-const SizesType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
+const SizesAndStridesType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
 
 // Zein import files...
 const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
@@ -43,9 +43,12 @@ pub fn TensorAllocator(comptime value_type: type) type {
         const Self = @This();
 
         const SelfPtr = *Self;
+        
         const ConstSelfPtr = *const Self;
         
         const ValueType = value_type;
+
+        const SizesType = SizesAndStridesType;
         
         allocator: Allocator,    
 
@@ -73,10 +76,31 @@ pub fn TensorAllocator(comptime value_type: type) type {
                         
             tensor.*.values = try self.*.allocValues(size);
         }
-
+        
         pub fn freeFromTensor(self: SelfPtr, tensor: anytype) void {
             self.*.freeValues(tensor.*.releaseValues());            
         }
+
+        // I feel this function is justified because it not only
+        // provides syntactic sugar for the creating tensors, but
+        // it also ensures that the tensor's construction is valid.
+
+        pub fn allocTensor(
+            self: SelfPtr, 
+            comptime rank: usize,
+            comptime order: OrderType,
+            sizes: [rank]SizesType) !Tensor(ValueType, rank, order) {
+
+            const size = sliceProduct(SizesType, &sizes);
+
+            if(size == 0) {
+                return AllocatorError.TensorSizeZero;
+            } 
+            var data = try self.*.allocValues(size);
+                        
+            return Tensor(ValueType, rank, order).init(data, sizes);
+        }
+
     };
 }
 
@@ -91,7 +115,7 @@ test "Allocate and Free" {
     var factory = TensorAllocator(f32).init(GPA.allocator());
 
     /////////////////////////////////////////
-    { // assign directly to tensor //////////
+    { // assign into to tensor //////////////
         var X = Tensor(f32, 2, Rowwise).init(
             null, .{ 10, 10 }
         );
@@ -118,6 +142,18 @@ test "Allocate and Free" {
 
         // tensor slice should be reset
         factory.freeValues(X.releaseValues());
+        try expect(X.valueSize() == 0);
+    }
+
+    /////////////////////////////////////////
+    { // assign directly to tensor //////////
+        var X = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
+
+        // create 100 elements... 10x10
+        try expect(X.valueSize() == 100);
+
+        // tensor slice should be reset
+        factory.freeFromTensor(&X);
         try expect(X.valueSize() == 0);
     }
     
