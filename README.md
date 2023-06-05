@@ -41,10 +41,12 @@ try x.permutate(.{1, 0}); // initially was {0, 1}...
 
 ```
 
+# Allocating Tensor Data
 Tensor Factories with Allocator support will be coming very soon! Use your desired
 allocator to quickly create tensors, or initialize them from existing memory...
 your choice!
 
+# Memory owernship and viewership
 Currently, tensor permutations only change the indexing of a tensor - they do not
 invalidate underyling memory. There will be support for data transformations as well,
 but they will be in the form of free functions with descriptive names. Until then,
