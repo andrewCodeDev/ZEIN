@@ -43,7 +43,7 @@ const ReduceOp = @import("std").builtin.ReduceOp;
 // Zein import files...
 pub const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
 pub const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
-const OrderType = @import("SizesAndStrides.zig").OrderType;
+pub const OrderType = @import("SizesAndStrides.zig").OrderType;
 pub const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 pub const Colwise = @import("SizesAndStrides.zig").Colwise;
 
