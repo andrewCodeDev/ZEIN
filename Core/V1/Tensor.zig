@@ -59,7 +59,7 @@ const TensorError = error {
 };
 
 // Used to quickly compute integer products such as total tensor capacity.
-// This operation needs to be as fast so that safety checks are low-cost.
+// This operation needs to be very fast so that safety checks are low-cost.
 fn integerProduct(comptime rank: usize, comptime value_type: type, ints: *const [rank]value_type) value_type {
     const s : @Vector(rank,value_type) = ints.*;
     return @reduce(ReduceOp.Mul, s);
@@ -253,7 +253,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
             // tensors can have different SizesAndStrides
             // and still share the total value capcity
-            if(capacity_b != capacity_b){
+            if(capacity_a != capacity_b){
                 return TensorError.CapacityMismatch;
             }
             // check that both tensors are at capacity without additional computation
