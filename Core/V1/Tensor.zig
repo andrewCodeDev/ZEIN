@@ -51,7 +51,7 @@ const Permutate = @import("Permutate.zig");
 
 // Tensor Utilities...
 const TensorError = error {
-    InvlaidTensorLayout,
+    InvalidTensorLayout,
     InvalidPermutation,
     AllocSizeMismatch,
     CapacityMismatch,
@@ -241,7 +241,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 return TensorError.AllocSizeMismatch;
             }
             if(!self.*.isValid() or !other.*.isValid()) {
-                return TensorError.InvlaidTensorLayout;
+                return TensorError.InvalidTensorLayout;
             }
             self.*.swapValuesUnchecked(other);
         }
@@ -258,7 +258,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             }
             // check that both tensors are at capacity without additional computation
             if(self.*.valueSize() != capacity_a  or other.*.valueSize() != capacity_b) {
-                return TensorError.InvlaidTensorLayout;
+                return TensorError.InvalidTensorLayout;
             }
             self.*.swapSizesAndStridesUnchecked(other);
         }
@@ -268,7 +268,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             // They only need to both be valid tensors to prevent invalidation.
 
             if(!self.*.isValid() or !other.*.isValid()) {
-                return TensorError.InvlaidTensorLayout;
+                return TensorError.InvalidTensorLayout;
             }
             self.*.swapUnchecked(other);
         }
