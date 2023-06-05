@@ -45,15 +45,20 @@ Using the TensorAllocator is easy and intuitive and designed to work with Tensor
 ```zig
 var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
 
+// Accepts standard conforming allocator.
 var allocator = TensorAllocator(f32).init(GPA.allocator());
 
-var X = Tensor(f32, 2, Rowwise).init(
-    null, .{ 10, 10 }
-);
+// Option 1: assign memory into existing tensor.
+var X = Tensor(f32, 2, Rowwise).init(null, .{ 10, 10 });
 
 try allocator.allocToTensor(&X); // alloc 100 elements...
 
-allocator.freeFromTensor(&X); // free and reset tensor...
+// Option 2: assign a new tensor from allocator.
+var Y = try allocator.allocTensor(2, Rowwise, .{10, 10});
+
+// Deallocate tensor values...
+allocator.freeFromTensor(&X); // free and reset X...
+allocator.freeFromTensor(&Y); // free and reset Y...
 ```
 
 # Memory owernship and viewership
