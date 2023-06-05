@@ -308,14 +308,14 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // to ensure that everything lines up before using a tensor to be
         // certain that they are doing valid indexing.
         
-        fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
+        pub fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
             const n = computeTensorIndex(
                 Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );
             return self.*.values[n];
         }
 
-        fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizeAndStride.ValueType) void {
+        pub fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizeAndStride.ValueType) void {
             const n = computeTensorIndex(
                 Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
             );

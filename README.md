@@ -18,8 +18,8 @@ Tensors can be created in the following way:
 This library currently supports tensors within rank [1, 64). 
 
 ```
-const Tensor = @import("ZEIN/Zein.Zig").Tensor;
-const Rowwise = @import("ZEIN/Zein.Zig").Rowwise;
+const Tensor = @import("ZEIN/Zein.zig").Tensor;
+const Rowwise = @import("ZEIN/Zein.zig").Rowwise;
 
 // initialize underlying tensor memory:
 
@@ -37,7 +37,7 @@ const x = X.getValue(.{0, 2});
 
 // transpose the tensor's view:
 
-try x.permutate(.{1, 0}); // initially was {0, 1}...
+try X.permutate(.{1, 0}); // initially was {0, 1}...
 
 ```
 
