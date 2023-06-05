@@ -40,6 +40,8 @@
 // STD import files...
 const ReduceOp = @import("std").builtin.ReduceOp;
 
+const arrayProduct = @import("Utility.zig").arrayProduct;
+
 // Zein import files...
 pub const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
 pub const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
@@ -50,20 +52,13 @@ pub const Colwise = @import("SizesAndStrides.zig").Colwise;
 const Permutate = @import("Permutate.zig");
 
 // Tensor Utilities...
-const TensorError = error {
+pub const TensorError = error {
     InvalidTensorLayout,
     InvalidPermutation,
     AllocSizeMismatch,
     CapacityMismatch,
     RankMismatch
 };
-
-// Used to quickly compute integer products such as total tensor capacity.
-// This operation needs to be very fast so that safety checks are low-cost.
-fn integerProduct(comptime rank: usize, comptime value_type: type, ints: *const [rank]value_type) value_type {
-    const s : @Vector(rank,value_type) = ints.*;
-    return @reduce(ReduceOp.Mul, s);
-}
 
 fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]SizeAndStride.ValueType) bool {
     // O(N) operation to check for valid permutations.
@@ -121,6 +116,8 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
         pub const Order = order;
 
+        pub const SizesType = SizeAndStride.ValueType;
+
         pub const ValueType = value_type;
 
         pub const ValueSlice = []ValueType;
@@ -136,25 +133,22 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         values : ValueSlice,
         sizes_and_strides : SizesAndStridesType,
 
-        pub fn init(
-            values: ?ValueSlice,
-            sizes : ?[Rank]u32,
-        ) Self {
+        pub fn init(values: ?ValueSlice, sizes: ?[Rank]SizesType) Self {
             return Self {
-                .values = if (values) |vs| (vs) else &[_]ValueType{},
+                .values = if (values) |vs| (vs) else &[_]ValueType{ },
                 .sizes_and_strides = SizesAndStridesType.init(sizes),
             };
         }
 
-        pub fn sliceSizes(self: ConstSelfPtr) [] const SizeAndStride.ValueType {
+        pub fn sliceSizes(self: ConstSelfPtr) [] const SizesType {
             return &self.*.sizes_and_strides.sizes;
         }
-        pub fn sliceStrides(self: ConstSelfPtr) [] const SizeAndStride.ValueType {
+        pub fn sliceStrides(self: ConstSelfPtr) [] const SizesType {
             return &self.*.sizes_and_strides.strides;
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
-            return integerProduct(Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.sizes);
+            return arrayProduct(Rank, SizesType, &self.*.sizes_and_strides.sizes);
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
             return self.*.values.len;
@@ -213,7 +207,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         }
 
         // to use this function safely, check that each index from 0..Rank is present
-        pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizeAndStride.ValueType) void {
+        pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizesType) void {
             Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, permutation);
         }
 
@@ -231,7 +225,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             if(self.*.valueCapacity() != values.len){
                 return TensorError.AllocSizeMismatch;
             }
-            self.*.setValuesUnchecked(self, values);
+            self.*.setValuesUnchecked(values);
         }
 
         pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
@@ -273,12 +267,19 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             self.*.swapUnchecked(other);
         }
 
-        pub fn permutate(self: SelfPtr, permutation: [rank]SizeAndStride.ValueType) !void {
+        pub fn permutate(self: SelfPtr, permutation: [rank]SizesType) !void {
             // check that all indices are accounted for
             if(!checkBitwisePermutation(Rank, &permutation)){
                 return TensorError.InvalidPermutation;
             }
             Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
+        }
+
+        // The user is expected to manage the values after releasing them.
+        pub fn releaseValues(self: SelfPtr) ValueSlice {
+            var tmp = self.*.values;
+            self.*.values = &[_]ValueType{};
+            return tmp;
         }
 
         /////////////////////////////////////////////////
@@ -308,16 +309,16 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // to ensure that everything lines up before using a tensor to be
         // certain that they are doing valid indexing.
         
-        pub fn getValue(self: ConstSelfPtr, indices: [rank]SizeAndStride.ValueType) ValueType {
+        pub fn getValue(self: ConstSelfPtr, indices: [rank]SizesType) ValueType {
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
+                Rank, SizesType, &self.*.sizes_and_strides.strides, indices
             );
             return self.*.values[n];
         }
 
-        pub fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizeAndStride.ValueType) void {
+        pub fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizesType) void {
             const n = computeTensorIndex(
-                Rank, SizeAndStride.ValueType, &self.*.sizes_and_strides.strides, indices
+                Rank, SizesType, &self.*.sizes_and_strides.strides, indices
             );
             self.*.values[n] = value;
         }
