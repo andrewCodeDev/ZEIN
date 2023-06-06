@@ -20,6 +20,8 @@ pub fn permutateInput(
     x_s.* = tmp;  
 }
 
+
+
 pub fn permutateOutput(
     comptime rank_x : usize,
     comptime value_type_x: type,

@@ -87,7 +87,7 @@ fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]SizeA
     return (checked < limit) and @popCount(checked) == rank;
 }
 
-inline fn computeTensorIndex(
+pub inline fn computeTensorIndex(
     comptime rank: usize,
     comptime value_type: type, 
     strides: *const [rank]value_type,
@@ -146,6 +146,9 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         pub fn sliceStrides(self: ConstSelfPtr) [] const SizesType {
             return &self.*.sizes_and_strides.strides;
         }
+        pub fn slicePermutation(self: ConstSelfPtr) [] const SizesType {
+            return &self.*.sizes_and_strides.permutation;
+        }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
             return arrayProduct(Rank, SizesType, &self.*.sizes_and_strides.sizes);
@@ -167,7 +170,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // indexing into your tensor!
 
         pub fn isValid(self: ConstSelfPtr) bool {
-            return self.*.valueSize() == self.*.valueCapacity();
+            return self.valueSize() != 0 and self.*.valueSize() == self.*.valueCapacity();
         }
 
         /////////////////////////////////////////
@@ -208,7 +211,8 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
         // to use this function safely, check that each index from 0..Rank is present
         pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizesType) void {
-            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, permutation);
+            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
+            self.*.sizes_and_strides.permutation = permutation;
         }
 
         ///////////////////////////////////////
@@ -272,7 +276,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             if(!checkBitwisePermutation(Rank, &permutation)){
                 return TensorError.InvalidPermutation;
             }
-            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
+            self.*.permutateUnchecked(permutation);
         }
 
         // The user is expected to manage the values after releasing them.
@@ -321,6 +325,14 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 Rank, SizesType, &self.*.sizes_and_strides.strides, indices
             );
             self.*.values[n] = value;
+        }
+        
+        pub inline fn getSize(self: ConstSelfPtr, i: usize) SizesType {
+            return self.*.sizes_and_strides.sizes[i];
+        }
+        
+        pub inline fn getStride(self: ConstSelfPtr, i: usize) SizesType {
+            return self.*.sizes_and_strides.strides[i];
         }
     };
 }

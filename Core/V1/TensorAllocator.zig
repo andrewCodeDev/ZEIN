@@ -101,6 +101,17 @@ pub fn TensorAllocator(comptime value_type: type) type {
             return Tensor(ValueType, rank, order).init(data, sizes);
         }
 
+        pub fn copyTensor(self: SelfPtr, tensor: anytype) !@TypeOf(tensor.*) {
+            const T = @TypeOf(tensor.*);
+            
+            var values = try self.allocValues(tensor.*.valueSize());
+
+            @memcpy(values, tensor.*.values);
+
+            return T { 
+                .values = values, .sizes_and_strides = tensor.*.sizes_and_strides
+            };
+        }
     };
 }
 
@@ -155,6 +166,22 @@ test "Allocate and Free" {
         // tensor slice should be reset
         factory.freeFromTensor(&X);
         try expect(X.valueSize() == 0);
+    }
+    /////////////////////////////////////////
+    { // assign directly to tensor //////////
+        var X = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
+        var Y = try factory.copyTensor(&X);
+
+        // create 100 elements... 10x10
+        try expect(X.valueSize() == 100);
+        try expect(Y.valueSize() == 100);
+
+        // tensor slice should be reset
+        factory.freeFromTensor(&X);
+        factory.freeFromTensor(&Y);
+
+        try expect(X.valueSize() == 0);
+        try expect(Y.valueSize() == 0);
     }
     
     if (GPA.deinit() == .leak) { @panic("LEAK DETECTED"); }

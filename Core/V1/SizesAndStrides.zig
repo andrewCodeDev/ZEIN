@@ -80,6 +80,13 @@ fn inferStridesFromSizes(
     return strides;
  }
 
+pub fn defaultPermutation(comptime rank: usize, comptime T: type) [rank]T {
+    var tmp: [rank]T = undefined;
+    var i: T = 0;
+    while(i < rank) : (i += 1) { tmp[i] = i; }
+    return tmp;
+}
+
 /////////////////////////////////////////
 // SizesAndStrides Struct Implementation 
 
@@ -99,13 +106,15 @@ fn inferStridesFromSizes(
 
         pub const ValueType = SizeAndStride.ValueType;
     
-        sizes:   [Rank]ValueType = undefined,
+        sizes: [Rank]ValueType = undefined,
         strides: [Rank]ValueType = undefined,
+        permutation: [Rank]ValueType = undefined,
     
         pub fn init(sizes: ?[Rank]ValueType) Self {
             return Self {
                 .sizes = unpackOptionalSizes(Rank, sizes),
                 .strides = inferStridesFromSizes(Rank, Order, sizes),
+                .permutation = defaultPermutation(rank, ValueType)
             };
         }
         
