@@ -141,22 +141,22 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
             // return the same value for a given index. This is because it's new permutated
             // layout will cancel out the effect of permutating the values.
 
-            //var tmp = x.*.sizes_and_strides;
+            var tmp = x.*;
 
             if(Policy.validate_args) {
-                if (!x.*.isValid()) { 
+                if (!tmp.isValid()) { 
                     return TensorError.InvalidTensorLayout; 
                 }
-                try x.*.permutate(permutation);
+                try tmp.permutate(permutation);
             }
             else {
-                x.*.permutateUnchecked(permutation);
+                tmp.permutateUnchecked(permutation);
             }
             
             if(Policy.alloc_scratch) {
                 // check if we have enough scratch memory
-                if(self.*.scratchSize() < x.*.valueSize()){
-                    try self.*.resizeScratch(x.*.valueSize());
+                if(self.*.scratchSize() < tmp.valueSize()){
+                    try self.*.resizeScratch(tmp.valueSize());
                 }
 
                 // for the V1 naive implementation, this will be
@@ -168,10 +168,10 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
                 var counter: XT.SizesType = 0;
 
                 @call(.always_inline, recursivePermutateValues, .{
-                     XT.ValueType, SizesType, XT.Rank, 0, x, self.*.scratch, &indices, &counter
+                     XT.ValueType, SizesType, XT.Rank, 0, &tmp, self.*.scratch, &indices, &counter
                 });
 
-                @memcpy(x.*.values, self.*.scratch[0..x.*.valueSize()]);
+                @memcpy(tmp.values, self.*.scratch[0..tmp.valueSize()]);
             }
             else {
                 @compileError("Non-scratch memory version of permutateValues is not implemented.");
