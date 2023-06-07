@@ -170,7 +170,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // indexing into your tensor!
 
         pub fn isValid(self: ConstSelfPtr) bool {
-            return self.valueSize() != 0 and self.*.valueSize() == self.*.valueCapacity();
+            return self.*.valueSize() != 0 and self.*.valueSize() == self.*.valueCapacity();
         }
 
         /////////////////////////////////////////
