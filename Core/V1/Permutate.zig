@@ -12,14 +12,14 @@ pub fn permutateInput(
     permutation: *const [rank]u32
 ) void {
 
-    var sizes: [rank]SizesType = undefined;
+    var tmp: SizesAndStrides(rank, order) = undefined;
 
     var i :usize = 0;
     for(permutation) |p| {
-        sizes[i] = x_s.*.sizes[p];
+        tmp.setSizeAndStride(i, x_s.*.getSizeAndStride(p));
         i += 1;
     }
-    x_s.* = SizesAndStrides(rank, order).init(sizes); 
+    x_s.* = tmp;
 }
 
 pub fn checkBitwisePermutation(

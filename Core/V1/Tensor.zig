@@ -121,20 +121,20 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         }
 
         pub fn sliceSizes(self: ConstSelfPtr) [] const SizesType {
-            return &self.*.sizes_and_strides.sizes;
+            return &self.sizes_and_strides.sizes;
         }
         pub fn sliceStrides(self: ConstSelfPtr) [] const SizesType {
-            return &self.*.sizes_and_strides.strides;
+            return &self.sizes_and_strides.strides;
         }
         pub fn slicePermutation(self: ConstSelfPtr) [] const SizesType {
-            return &self.*.sizes_and_strides.permutation;
+            return &self.sizes_and_strides.permutation;
         }
         
         pub fn valueCapacity(self: ConstSelfPtr) usize {
-            return arrayProduct(Rank, SizesType, &self.*.sizes_and_strides.sizes);
+            return arrayProduct(Rank, SizesType, &self.sizes_and_strides.sizes);
         }
         pub fn valueSize(self: ConstSelfPtr) usize {
-            return self.*.values.len;
+            return self.values.len;
         }
 
         // This is a critical function that users should call
@@ -150,7 +150,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // indexing into your tensor!
 
         pub fn isValid(self: ConstSelfPtr) bool {
-            return self.*.valueSize() != 0 and self.*.valueSize() == self.*.valueCapacity();
+            return self.valueSize() != 0 and self.valueSize() == self.valueCapacity();
         }
 
         /////////////////////////////////////////
@@ -164,36 +164,36 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // to use this function safely, check that both tensor value
         // sizes are the same and that both tensors are at capacity
         pub fn swapValuesUnchecked(self: SelfPtr, other: SelfPtr) void {
-            var values = self.*.values;
-            var index = self.*.alloc_index;
+            var values = self.values;
+            var index = self.alloc_index;
 
             // assign values and index from other
-            self.*.values = other.*.values;
-            self.*.alloc_index = other.*.alloc_index;
+            self.values = other.values;
+            self.alloc_index = other.alloc_index;
 
             // assign values and index to other
-            other.*.values = values;
-            other.*.alloc_index = index;
+            other.values = values;
+            other.alloc_index = index;
         }
 
         // to use this function safely, check that the both tensors are at capacity
         pub fn swapSizesAndStridesUnchecked(self: SelfPtr, other: SelfPtr) void {
             // there is probably a faster way to do this
-            var tmp = self.*.sizes_and_strides;
-            self.*.sizes_and_strides = other.*.sizes_and_strides;
-            other.*.sizes_and_strides = tmp;
+            var tmp = self.sizes_and_strides;
+            self.sizes_and_strides = other.sizes_and_strides;
+            other.sizes_and_strides = tmp;
         }
 
         // to use this function safely, check that both tensors are at capacity
         pub fn swapUnchecked(self: SelfPtr, other: SelfPtr) void {
-            self.*.swapValuesUnchecked(other);
-            self.*.swapSizesAndStridesUnchecked(other);
+            self.swapValuesUnchecked(other);
+            self.swapSizesAndStridesUnchecked(other);
         }
 
         // to use this function safely, check that each index from 0..Rank is present
         pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizesType) void {
-            Permutate.permutateInput(Rank, Order, &self.*.sizes_and_strides, &permutation);
-            self.*.sizes_and_strides.permutation = permutation;
+            Permutate.permutateInput(Rank, Order, &self.sizes_and_strides, &permutation);
+            self.sizes_and_strides.permutation = permutation;
         }
 
         ///////////////////////////////////////
@@ -207,13 +207,13 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
             // to assure that sizes and strides are not
             // invalidated, we check size and capacity
-            if(self.*.valueSize() != other.*.valueSize()){
+            if(self.valueSize() != other.valueSize()){
                 return TensorError.AllocSizeMismatch;
             }
-            if(!self.*.isValid() or !other.*.isValid()) {
+            if(!self.isValid() or !other.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            self.*.swapValuesUnchecked(other);
+            self.swapValuesUnchecked(other);
         }
 
         pub fn swapSizesAndStrides(self: SelfPtr, other: SelfPtr) !void {
@@ -227,20 +227,20 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 return TensorError.CapacityMismatch;
             }
             // check that both tensors are at capacity without additional computation
-            if(self.*.valueSize() != capacity_a  or other.*.valueSize() != capacity_b) {
+            if(self.valueSize() != capacity_a  or other.valueSize() != capacity_b) {
                 return TensorError.InvalidTensorLayout;
             }
-            self.*.swapSizesAndStridesUnchecked(other);
+            self.swapSizesAndStridesUnchecked(other);
         }
 
         pub fn swap(self: SelfPtr, other: SelfPtr) !void {
             // Two tensors do not need to be the same size to be swapped.
             // They only need to both be valid tensors to prevent invalidation.
 
-            if(!self.*.isValid() or !other.*.isValid()) {
+            if(!self.isValid() or !other.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            self.*.swapUnchecked(other);
+            self.swapUnchecked(other);
         }
 
         pub fn permutate(self: SelfPtr, permutation: [rank]SizesType) !void {
@@ -248,7 +248,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             if(!Permutate.checkBitwisePermutation(Rank, &permutation)){
                 return TensorError.InvalidPermutation;
             }
-            self.*.permutateUnchecked(permutation);
+            self.permutateUnchecked(permutation);
         }
 
         /////////////////////////////////////////////////
@@ -277,27 +277,26 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // the user should also call isValid before using their tensors
         // to ensure that everything lines up before using a tensor to be
         // certain that they are doing valid indexing.
-        
         pub fn getValue(self: ConstSelfPtr, indices: [rank]SizesType) ValueType {
             const n = computeTensorIndex(
-                Rank, SizesType, &self.*.sizes_and_strides.strides, indices
+                Rank, SizesType, &self.sizes_and_strides.strides, indices
             );
-            return self.*.values[n];
+            return self.values[n];
         }
 
         pub fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizesType) void {
             const n = computeTensorIndex(
-                Rank, SizesType, &self.*.sizes_and_strides.strides, indices
-            );
-            self.*.values[n] = value;
+                Rank, SizesType, &self.sizes_and_strides.strides, indices
+            );            
+            self.values[n] = value;
         }
         
         pub inline fn getSize(self: ConstSelfPtr, i: usize) SizesType {
-            return self.*.sizes_and_strides.sizes[i];
+            return self.sizes_and_strides.sizes[i];
         }
         
         pub inline fn getStride(self: ConstSelfPtr, i: usize) SizesType {
-            return self.*.sizes_and_strides.strides[i];
+            return self.sizes_and_strides.strides[i];
         }
     };
 }

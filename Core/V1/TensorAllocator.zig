@@ -30,6 +30,8 @@ const OrderType = @import("SizesAndStrides.zig").OrderType;
 const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 const Colwise = @import("SizesAndStrides.zig").Colwise;
 
+const sliceProduct = @import("Utility.zig").sliceProduct;
+
 pub const AllocatorError = error {
     UnknownObject,
     TensorSizeZero,
@@ -39,13 +41,56 @@ pub const AllocatorError = error {
     InvalidIndex
 };
 
-// for TensorAllocator storage
-var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
-
 // used to keep track of tensor allocations
 const ArrayList = @import("std").ArrayList;
 
-const sliceProduct = @import("Utility.zig").sliceProduct;
+const Mutex = @import("std").Thread.Mutex;
+
+// this is a current work around until more work can
+// go into the allocator itself - right now, it uses
+// an ArrayList of allocations to free memory. Unfortunately,
+// that means that it also needs an allocator itself.
+// at some point, this should be replaced, but it
+// works for now. I'm setting the BufferSize to something
+// large enough to handle anything reasonable (and then some...)
+
+// GPA for null initialized tensor allocators.
+const GPA = std.heap.GeneralPurposeAllocator(.{ });
+
+// A number large enough that it shouldn't matter.
+const BufferSize = 100;
+var BufferMutex = Mutex{};
+var GPABuffer: [BufferSize]?GPA = undefined;
+var GPAUsed: usize = 0;
+
+fn constructGpaIndex() usize {
+    BufferMutex.lock();
+
+    defer BufferMutex.unlock();
+
+    var i: usize = 0;
+
+    while(i < BufferSize) : (i += 1){
+        if (GPABuffer[i] == null) { 
+            GPABuffer[i] = GPA{};
+            return i; 
+        }
+    }
+    if (i == BufferSize) {
+        @panic("Too many tensor allocator instances.");
+    }
+    return i;
+}
+
+/////////////////////////////////////////
+// only call this after calling deinit!!!
+fn nullifyGpaIndex(index: usize) void {
+    BufferMutex.lock();
+
+    GPABuffer[index] = null;
+
+    BufferMutex.unlock();
+}
 
 
 pub fn TensorAllocator(comptime value_type: type) type {
@@ -68,35 +113,45 @@ pub fn TensorAllocator(comptime value_type: type) type {
             index: usize,
             alloc: []ValueType,
         };
+
+        gpa_index: usize,
         
         allocator: Allocator,    
 
         storage: StorageType,
 
-        default: bool,
-
         pub fn init(allocator: ?Allocator) Self {
+
+            const index = constructGpaIndex();
+
+            var gpa: *GPA = undefined;
+
+            if(GPABuffer[index]) |*a| {
+                gpa = a;
+            }
             return Self { 
-                .allocator = if(allocator) |a| a else GPA.allocator(),
-                .storage = StorageType.init(GPA.allocator()),
-                .default = if(allocator) |_| false else true,
+                .gpa_index = index,
+                .allocator = if(allocator)|a| a else gpa.allocator(),
+                .storage = StorageType.init(gpa.allocator()),
             };
         }
 
         pub fn deinit(self: SelfPtr) void {
             // free all existing allocations if they are not null
-            for(self.*.storage.items) |item| {
-                if(item) |alloc| { self.*.allocator.free(alloc); }
+            for(self.storage.items) |item| {
+                if(item) |alloc| { self.allocator.free(alloc); }
             }
-            self.*.storage.deinit();
+            self.storage.deinit();
+            
+            const index = self.gpa_index;
 
-            if(self.*.default) {
-                // probably could do something other than panic.
-                if (GPA.deinit() == .leak) { @panic("LEAK DETECTED"); }
+            if(GPABuffer[index]) |*a| {
+                if (a.deinit() == .leak) { @panic("LEAK DETECTED"); }
             }
+            nullifyGpaIndex(index);
         }
 
-        fn allocValues(self: SelfPtr, size: usize, old_index: ?usize) !IndexedAlloc {
+        pub fn allocValues(self: SelfPtr, size: usize, old_index: ?usize) !IndexedAlloc {
 
             // I'm using the old_index parameter to be able to re-use
             // data members from the storage array. If for some reason
@@ -109,42 +164,41 @@ pub fn TensorAllocator(comptime value_type: type) type {
             if(size == 0) {
                 return AllocatorError.TensorSizeZero;
             }
-
-            var alloc = try self.*.allocator.alloc(ValueType, size);
+            var alloc = try self.allocator.alloc(ValueType, size);
 
             // if old_index is not null, check to see if it fits
             // fits the storage capacity to re-use existing item
             if(old_index) |index| {
-                if(index <= self.*.storage.items.len) {
+                if(index <= self.storage.items.len) {
                     // reuse existing storage item if null
-                    if(self.*.storage.items[index] == null) {
-                        self.*.storage.items[index] = alloc;
+                    if(self.storage.items[index] == null) {
+                        self.storage.items[index] = alloc;
                         return IndexedAlloc{ .index = index, .alloc = alloc };
                     }
                 }
             }
             // if old_index was null or was larger than
             // the storage capacity, append a new item
-            const index = self.*.storage.items.len;
-            try self.*.storage.append(alloc);
+            const index = self.storage.items.len;
+            try self.storage.append(alloc);
             return IndexedAlloc{ .index = index, .alloc = alloc };
         }
 
-        fn freeValues(self: SelfPtr, values: []ValueType, index: usize) !void {
+        pub fn freeValues(self: SelfPtr, values: []ValueType, index: usize) !void {
 
             // we need to check that the index is valid
             // for the storage that we have and then
             // see if the pointers are the same.
 
-            if(self.*.storage.items.len <= index) {
+            if(self.storage.items.len <= index) {
                 return AllocatorError.WrongAllocator;
             }
-            if(self.*.storage.items[index]) |alloc| {
+            if(self.storage.items[index]) |alloc| {
                 if(alloc.ptr != values.ptr){
                     return AllocatorError.WrongAllocator;
                 }
-                self.*.storage.items[index] = null;
-                self.*.allocator.free(values);
+                self.storage.items[index] = null;
+                self.allocator.free(values);
             }
             else {
                 return AllocatorError.IndexAlreadyFreed;
@@ -155,14 +209,11 @@ pub fn TensorAllocator(comptime value_type: type) type {
 
             // pretty simple, make a new allocation
             // and then assign the storage index
-            
             if(tensor.*.valueSize() != 0) {
                 return AllocatorError.TensorHasAlloc;
-            }
-            const capacity = tensor.*.valueCapacity();
-            
-            var indexed_alloc = try self.*.allocValues(
-                capacity, tensor.*.alloc_index 
+            }            
+            var indexed_alloc = try self.allocValues(
+                tensor.*.valueCapacity(), tensor.*.alloc_index 
             );
             tensor.*.values = indexed_alloc.alloc;
             tensor.*.alloc_index = indexed_alloc.index;
@@ -172,9 +223,8 @@ pub fn TensorAllocator(comptime value_type: type) type {
 
             // this function leaves the storage index intact so
             // the same tensor can request allocations again
-
             if(tensor.*.alloc_index) |index| {
-                try self.*.freeValues(tensor.*.values, index);
+                try self.freeValues(tensor.*.values, index);
                 tensor.*.values = &[_]ValueType{ };
             }
             else {
@@ -193,7 +243,7 @@ pub fn TensorAllocator(comptime value_type: type) type {
             if(size == 0) {
                 return AllocatorError.TensorSizeZero;
             } 
-            var indexed_alloc = try self.*.allocValues(size, null);
+            var indexed_alloc = try self.allocValues(size, null);
                         
             return Tensor(ValueType, rank, order) {
                 .values = indexed_alloc.alloc,

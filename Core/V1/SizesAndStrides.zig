@@ -41,32 +41,38 @@ inline fn unpackOptionalSizes(comptime rank: usize,  sizes: ?[rank]SizesType) [r
 
 fn inferStridesFromSizes(comptime rank: usize, comptime order: OrderType, sizes: ?[rank]SizesType) [rank]SizesType {
     
-    var strides : [rank]SizeAndStride.ValueType = undefined;
+    var strides : [rank]SizesType = undefined;
+
+    if(rank == 1) {
+        strides[0] = 1;
+        return strides;
+    }
 
     if(sizes) |data| { 
+        strides = data;
+
         if (order == OrderType.rowwise) {
                 
-            // the farthest right element needs to have a stride of one
-            strides[rank - 1] = 1;
+            var i: usize = (rank - 1);
+            var n: SizesType = 1;
 
-            // all of the other elements step stride over the next size up
-            var i: usize = rank - 1;
-
-            while(0 < i) : (i -= 1) {
-                strides[i - 1] = data[i];
+            while(i > 0) : (i -= 1) {
+                strides[i] = n;
+                n *= data[i];
             }
+            strides[0] = n;
         }
 
         else {
-            // the farthest left element needs to have a stride of one
-            strides[0] = 1;
 
-            // all of the other elements step stride over the next size up
-            var i: usize = 1;
+            var i: usize = 0;
+            var n: SizesType = 1;
 
-            while(i < rank) : (i += 1) {
-                strides[i] = data[i - 1];
+            while(i < (rank - 1)) : (i += 1) {
+                strides[i] = n;
+                n *= data[i];
             }
+            strides[rank - 1] = n;
         }
     }
 
@@ -116,11 +122,11 @@ pub fn defaultPermutation(comptime rank: usize) [rank]SizesType {
         
         //// pairwise setters/getter
         pub fn getSizeAndStride(self: ConstSelfPtr, i: usize) SizeAndStride {
-            return .{ .size = self.*.sizes[i], .stride = self.*.strides[i] };
+            return .{ .size = self.sizes[i], .stride = self.strides[i] };
         }
         pub fn setSizeAndStride(self: SelfPtr, i: usize, pair: SizeAndStride) void {
-            self.*.sizes[i] = pair.size;
-            self.*.strides[i] = pair.stride;
+            self.sizes[i] = pair.size;
+            self.strides[i] = pair.stride;
         }
     };
 }
@@ -128,54 +134,26 @@ pub fn defaultPermutation(comptime rank: usize) [rank]SizesType {
 /////////////////////////////////
 //////////// TESTING ////////////
 
-test "Initialization" {
-    const std = @import("std");
-
-    var s1 = SizesAndStrides(5, Rowwise).init(
-            .{ 100, 101, 102, 103, 104 }
-        );
-
-    var s2 = SizesAndStrides(5, Rowwise).init(null);
-
-    s2.setSizeAndStride(0, .{ .size = 100, .stride = 101 });
-    s2.setSizeAndStride(1, .{ .size = 101, .stride = 102 });
-    s2.setSizeAndStride(2, .{ .size = 102, .stride = 103 });
-    s2.setSizeAndStride(3, .{ .size = 103, .stride = 104 });
-    s2.setSizeAndStride(4, .{ .size = 104, .stride =   1 });
-        
-    try std.testing.expect(s1.sizes[0] == s2.sizes[0]);
-    try std.testing.expect(s1.sizes[1] == s2.sizes[1]);
-    try std.testing.expect(s1.sizes[2] == s2.sizes[2]);
-    try std.testing.expect(s1.sizes[3] == s2.sizes[3]);
-    try std.testing.expect(s1.sizes[4] == s2.sizes[4]);
-
-    try std.testing.expect(s1.strides[0] == s2.strides[0]);
-    try std.testing.expect(s1.strides[1] == s2.strides[1]);
-    try std.testing.expect(s1.strides[2] == s2.strides[2]);
-    try std.testing.expect(s1.strides[3] == s2.strides[3]);
-    try std.testing.expect(s1.strides[4] == s2.strides[4]);
-}
-
 test "Rowwise/Colwise Ordering" {
 
     const std = @import("std");
 
     { ////////////////////////////////////////////
-        var s1 = SizesAndStrides(3, Rowwise).init(.{ 100, 101, 102 });
-        try std.testing.expect(s1.sizes[0] == 100);
-        try std.testing.expect(s1.sizes[1] == 101);
-        try std.testing.expect(s1.sizes[2] == 102);
-        try std.testing.expect(s1.strides[0] == 101);
-        try std.testing.expect(s1.strides[1] == 102);
-        try std.testing.expect(s1.strides[2] ==   1);
+        var s1 = SizesAndStrides(3, Rowwise).init(.{ 3, 2, 2 });
+        try std.testing.expect(s1.sizes[0] == 3);
+        try std.testing.expect(s1.sizes[1] == 2);
+        try std.testing.expect(s1.sizes[2] == 2);
+        try std.testing.expect(s1.strides[0] == 4);
+        try std.testing.expect(s1.strides[1] == 2);
+        try std.testing.expect(s1.strides[2] == 1);
     } 
     { ////////////////////////////////////////////
-        var s1 = SizesAndStrides(3, Colwise).init(.{ 100, 101, 102 });
-        try std.testing.expect(s1.sizes[0] == 100);
-        try std.testing.expect(s1.sizes[1] == 101);
-        try std.testing.expect(s1.sizes[2] == 102);
-        try std.testing.expect(s1.strides[0] ==   1);
-        try std.testing.expect(s1.strides[1] == 100);
-        try std.testing.expect(s1.strides[2] == 101);
+        var s1 = SizesAndStrides(3, Colwise).init(.{ 3, 2, 2 });
+        try std.testing.expect(s1.sizes[0] == 3);
+        try std.testing.expect(s1.sizes[1] == 2);
+        try std.testing.expect(s1.sizes[2] == 2);
+        try std.testing.expect(s1.strides[0] == 1);
+        try std.testing.expect(s1.strides[1] == 3);
+        try std.testing.expect(s1.strides[2] == 6);
      } 
 }

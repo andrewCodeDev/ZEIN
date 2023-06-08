@@ -21,7 +21,7 @@ const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 const Colwise = @import("SizesAndStrides.zig").Colwise;
 const SizeAndStrideType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
 const defaultPermuation = @import("SizesAndStrides.zig").defaultPermutation;
-
+var GPA = @import("TensorAllocator.zig");
 const ReduceOp = @import("std").builtin.ReduceOp;
 const mem = @import("std").mem;
 
@@ -43,29 +43,29 @@ pub const OpsPolicy = struct {
 // which stride is the smallest so we can create
 // an efficient permutation-order array.
 
-fn optimalPermutation(comptime rank: usize, strides: []SizeAndStrideType) [rank]SizeAndStrideType {
-    var perm: [rank]SizeAndStrideType = undefined;
-    
-    var i: usize = 1;
-    var j: usize = undefined;
-    var k: usize = undefined;
-
-    while(i < rank) : (i += 1) {
-        perm[i] = i;
-    }
-    
-    while(i < rank) : (i += 1) {
-        k = strides[perm[i]];
-        j = i;
- 
-        while (j > 0 and strides[perm[j]] > k) {
-            perm[j] = j;
-            j -= 1;
-        }
-        perm[j] = i;
-    }
-    return perm;
-}
+//fn optimalPermutation(comptime rank: usize, strides: []SizeAndStrideType) [rank]SizeAndStrideType {
+//    var perm: [rank]SizeAndStrideType = undefined;
+//    
+//    var i: usize = 1;
+//    var j: usize = undefined;
+//    var k: usize = undefined;
+//
+//    while(i < rank) : (i += 1) {
+//        perm[i] = i;
+//    }
+//    
+//    while(i < rank) : (i += 1) {
+//        k = strides[perm[i]];
+//        j = i;
+// 
+//        while (j > 0 and strides[perm[j]] > k) {
+//            perm[j] = j;
+//            j -= 1;
+//        }
+//        perm[j] = i;
+//    }
+//    return perm;
+//}
 
 pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
 
@@ -85,39 +85,39 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
 
         // The allocator data member is here incase
         // a user does not provide enough memory
-        allocator: TensorAllocator(AllocType),
+        allocator: *TensorAllocator(AllocType),
 
         // Scratch memory for operations
         scratch: []AllocType = &[_]AllocType{ },
 
-        pub fn init(allocator: TensorAllocator(AllocType)) Self {
-            return Self { .allocator = allocator };
+        alloc_index: ?usize,
+
+        pub fn init(allocator: *TensorAllocator(AllocType)) Self {
+            return Self { .allocator = allocator, .alloc_index = null };
         }
 
         pub fn scratchSize(self: ConstSelfPtr) usize {
-            return self.*.scratch.len;
+            return self.scratch.len;
         }
 
         pub fn releaseScratch(self: SelfPtr) []AllocType {
-            var tmp = self.*.scratch;
-            self.*.scratch = &[_]AllocType{};
+            var tmp = self.scratch;
+            self.scratch = &[_]AllocType{};
             return tmp;
         }        
 
         pub fn resizeScratch(self: SelfPtr, size: usize) !void {
-            if(self.*.scratch.len == size) {
+            if(self.scratch.len == size) {
                 return;
             }
-            if(self.*.scratchSize() != 0) {
-                self.*.allocator.freeValues(self.*.releaseScratch());
+            if(self.alloc_index) |i| {
+                try self.allocator.freeValues(self.scratch, i);
             }
-            self.*.scratch = try self.*.allocator.allocValues(size);
-        }
-
-        pub fn deinit(self: SelfPtr) void {
-            if(0 < self.*.scratchSize()) {
-                self.*.allocator.freeValues(self.*.releaseScratch());
-            }
+            var indexed_alloc = try self.allocator.allocValues(
+                size, self.alloc_index
+            );
+            self.alloc_index = indexed_alloc.index;
+            self.scratch = indexed_alloc.alloc;
         }
 
         //pub fn add(self: SelfPtr, X: anytype, Y: anytype, Z: anytype) !void {
@@ -183,8 +183,8 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
             
             if(Policy.alloc_scratch) {
                 // check if we have enough scratch memory
-                if(self.*.scratchSize() < tmp.valueSize()){
-                    try self.*.resizeScratch(tmp.valueSize());
+                if(self.scratchSize() < tmp.valueSize()){
+                    try self.resizeScratch(tmp.valueSize());
                 }
 
                 // for the V1 naive implementation, this will be
@@ -196,10 +196,10 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
                 var counter: XT.SizesType = 0;
 
                 @call(.always_inline, recursivePermutateValues, .{
-                     XT.ValueType, SizesType, XT.Rank, 0, &tmp, self.*.scratch, &indices, &counter
+                     XT.ValueType, SizesType, XT.Rank, 0, &tmp, self.scratch, &indices, &counter
                 });
 
-                @memcpy(tmp.values, self.*.scratch[0..tmp.valueSize()]);
+                @memcpy(tmp.values, self.scratch[0..tmp.valueSize()]);
             }
             else {
                 @compileError("Non-scratch memory version of permutateValues is not implemented.");
@@ -224,47 +224,6 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
 //                    scratch[count] = x.getValue(indices);
 //                    count += 1
 //
-
-inline fn recursivePermutateValues(
-    comptime VT: type, // value type
-    comptime IT: type, // int type
-    comptime R: usize, // tensor rank
-    comptime I: usize, // starting index
-    x: anytype, // source tensor
-    y: []VT, // destination memory
-    c: *[R]IT, // index container
-    n: *IT // scratch counter
-) void {
-
-    if(I == (R - 1)) {     
-        // we only need to make this once really...
-        const x_ss : @Vector(R, IT) = x.*.sizes_and_strides.strides;
-
-        var i: IT = 0;
-        var n_i = n.*;
-        while(i < x.*.getSize(I)) : ({ i += 1; n_i += 1; }) {
-
-            c[I] = i;
-            const x_c : @Vector(R, IT) = c.*;
-            const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
-
-            y[n_i] = x.*.values[x_i];
-        }
-        n.* += i;
-    }
-
-    else {
-        var i: IT = 0;
-        while(i < x.*.getSize(I)) : (i += 1) {
-            
-            c[I] = i; 
-            
-            @call(.always_inline, recursivePermutateValues, .{
-                 VT, IT, R, (I + 1), x, y, c, n 
-            });
-        }
-    }
-}
 
 inline fn recursivePermutateValues(
     comptime VT: type, // value type
@@ -361,10 +320,8 @@ inline fn min(x: anytype, y: anytype) @TypeOf(x) {
 
 test "vectorized reduce" {
     const std = @import("std");
-    
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
-    
-    var factory = TensorAllocator(i32).init(GPA.allocator());
+
+    var factory = TensorAllocator(i32).init(null);
     
     var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
     
@@ -388,25 +345,18 @@ test "vectorized reduce" {
         const y = vectorizedReduce(512, ReduceOp.Min, min, &x, std.math.maxInt(i32));
         try std.testing.expectEqual(y, -999);
     }
-    factory.freeFromTensor(&x);
-
-    if (GPA.deinit() == .leak) { @panic("LEAK DETECTED"); }
+    factory.deinit();
 }
 
 test "Permutate Values" {
     const std = @import("std");
-    
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
-    defer if (GPA.deinit() == .leak) @panic("LEAK DETECTED");
-    
-    var factory = TensorAllocator(i32).init(GPA.allocator());
 
-    var ops = TensorOps(i32, .{}).init(factory);
-    defer ops.deinit();
+    var factory = TensorAllocator(i32).init(null);
+
+    var ops = TensorOps(i32, .{}).init(&factory);
 
     // need a more convincing test
     var x = try factory.allocTensor(2, Rowwise, .{ 3, 3 });
-    defer factory.freeFromTensor(&x);
 
     var i: i32 = 1;
     for(x.values) |*v| { v.* = i; i += 1; }
@@ -424,4 +374,5 @@ test "Permutate Values" {
     try std.testing.expectEqual(x.values[7], 6);
     try std.testing.expectEqual(x.values[8], 9);
 
+    factory.deinit();
 }
