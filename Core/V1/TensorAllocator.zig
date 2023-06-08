@@ -76,10 +76,7 @@ fn constructGpaIndex() usize {
             return i; 
         }
     }
-    if (i == BufferSize) {
-        @panic("Too many tensor allocator instances.");
-    }
-    return i;
+    @panic("Too many tensor allocator instances.");
 }
 
 /////////////////////////////////////////
