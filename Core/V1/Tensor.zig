@@ -60,33 +60,6 @@ pub const TensorError = error {
     RankMismatch
 };
 
-fn checkBitwisePermutation(comptime rank: usize, permutation: *const [rank]SizeAndStride.ValueType) bool {
-    // O(N) operation to check for valid permutations.
-
-    // All indices of the SizesAndStrides must be
-    // checked before we can permutate. Otherwise,
-    // this could mean that a transpose operation
-    // could leave a tensor in an invalid state.
-
-    // bitwise limit to check if an index is out of bounds
-    const limit: usize = ((rank + 1) << 1);
-
-    // storage for bitwise OR operations checks
-    var checked: usize = 0;
-
-    // bit shifting zero by one is a no-op
-    // this is a work-around for indexing
-    var is_zero: usize = 0;
-    
-    for(permutation.*) |i| { 
-        checked |= (i << 1); 
-        is_zero |= @boolToInt((i == 0));
-    }
-    checked += is_zero;
-    
-    return (checked < limit) and @popCount(checked) == rank;
-}
-
 pub inline fn computeTensorIndex(
     comptime rank: usize,
     comptime value_type: type, 
@@ -272,7 +245,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
         pub fn permutate(self: SelfPtr, permutation: [rank]SizesType) !void {
             // check that all indices are accounted for
-            if(!checkBitwisePermutation(Rank, &permutation)){
+            if(!Permutate.checkBitwisePermutation(Rank, &permutation)){
                 return TensorError.InvalidPermutation;
             }
             self.*.permutateUnchecked(permutation);
@@ -340,27 +313,6 @@ test "Initialization" {
     const total: usize = 10 * 20 * 30;
 
     try expect(total == x.valueCapacity());        
-}
-
-test "Bitwise-Permutation" {
-    const expect = @import("std").testing.expect;
-
-    // valid permutation checks...
-    try expect(checkBitwisePermutation(3, &.{ 0, 1, 2 }));
-    try expect(checkBitwisePermutation(3, &.{ 0, 2, 1 }));
-    try expect(checkBitwisePermutation(3, &.{ 1, 0, 2 }));
-    try expect(checkBitwisePermutation(3, &.{ 1, 2, 0 }));
-    try expect(checkBitwisePermutation(3, &.{ 2, 0, 1 }));
-    try expect(checkBitwisePermutation(3, &.{ 2, 1, 0 }));
-    
-    // invalid permutation checks...
-    try expect(!checkBitwisePermutation(3, &.{ 0, 1, 0 }));
-    try expect(!checkBitwisePermutation(3, &.{ 0, 2, 6 }));
-    try expect(!checkBitwisePermutation(3, &.{ 0, 0, 0 }));
-    try expect(!checkBitwisePermutation(3, &.{ 1, 1, 1 }));
-    try expect(!checkBitwisePermutation(3, &.{ 6, 7, 8 }));
-    try expect(!checkBitwisePermutation(3, &.{ 1, 2, 2 }));
-    try expect(!checkBitwisePermutation(3, &.{ 1, 2, 3 }));
 }
 
 test "Tensor Transpose" {

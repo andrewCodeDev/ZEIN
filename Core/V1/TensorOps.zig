@@ -39,6 +39,34 @@ pub const OpsPolicy = struct {
     validate_args: bool = true,
 };
 
+// We're going to use insertion sort to figure out
+// which stride is the smallest so we can create
+// an efficient permutation-order array.
+
+fn optimalPermutation(comptime rank: usize, strides: []SizeAndStrideType) [rank]SizeAndStrideType {
+    var perm: [rank]SizeAndStrideType = undefined;
+    
+    var i: usize = 1;
+    var j: usize = undefined;
+    var k: usize = undefined;
+
+    while(i < rank) : (i += 1) {
+        perm[i] = i;
+    }
+    
+    while(i < rank) : (i += 1) {
+        k = strides[perm[i]];
+        j = i;
+ 
+        while (j > 0 and strides[perm[j]] > k) {
+            perm[j] = j;
+            j -= 1;
+        }
+        perm[j] = i;
+    }
+    return perm;
+}
+
 pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
 
     return struct {
@@ -196,6 +224,47 @@ pub fn TensorOps(comptime alloc_type: type, comptime policy: OpsPolicy) type {
 //                    scratch[count] = x.getValue(indices);
 //                    count += 1
 //
+
+inline fn recursivePermutateValues(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime R: usize, // tensor rank
+    comptime I: usize, // starting index
+    x: anytype, // source tensor
+    y: []VT, // destination memory
+    c: *[R]IT, // index container
+    n: *IT // scratch counter
+) void {
+
+    if(I == (R - 1)) {     
+        // we only need to make this once really...
+        const x_ss : @Vector(R, IT) = x.*.sizes_and_strides.strides;
+
+        var i: IT = 0;
+        var n_i = n.*;
+        while(i < x.*.getSize(I)) : ({ i += 1; n_i += 1; }) {
+
+            c[I] = i;
+            const x_c : @Vector(R, IT) = c.*;
+            const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
+
+            y[n_i] = x.*.values[x_i];
+        }
+        n.* += i;
+    }
+
+    else {
+        var i: IT = 0;
+        while(i < x.*.getSize(I)) : (i += 1) {
+            
+            c[I] = i; 
+            
+            @call(.always_inline, recursivePermutateValues, .{
+                 VT, IT, R, (I + 1), x, y, c, n 
+            });
+        }
+    }
+}
 
 inline fn recursivePermutateValues(
     comptime VT: type, // value type
