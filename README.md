@@ -3,8 +3,6 @@ Zig-based implementation of general-rank tensors! [1, 64)
 
 # Using Tensor Objects
 
-This library currently supports tensors within rank [1, 64). 
-
 Tensors can be created in the following way:
 
 ```zig
