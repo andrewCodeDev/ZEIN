@@ -15,6 +15,8 @@
 
 // Allocators still need to have the deinit() function called as per usual.
 
+const std = @import("std");
+
 const Allocator = @import("std").mem.Allocator;
 
 const Tensor = @import("Tensor.zig").Tensor;
@@ -31,10 +33,20 @@ const Colwise = @import("SizesAndStrides.zig").Colwise;
 pub const AllocatorError = error {
     UnknownObject,
     TensorSizeZero,
-    TensorHasAlloc
+    TensorHasAlloc,
+    WrongAllocator,
+    IndexAlreadyFreed,
+    InvalidIndex
 };
 
+// for TensorAllocator storage
+var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
+
+// used to keep track of tensor allocations
+const ArrayList = @import("std").ArrayList;
+
 const sliceProduct = @import("Utility.zig").sliceProduct;
+
 
 pub fn TensorAllocator(comptime value_type: type) type {
 
@@ -49,41 +61,126 @@ pub fn TensorAllocator(comptime value_type: type) type {
         const ValueType = value_type;
 
         const SizesType = SizesAndStridesType;
+
+        const StorageType = ArrayList(?[]ValueType);
+
+        const IndexedAlloc = struct {
+            index: usize,
+            alloc: []ValueType,
+        };
         
         allocator: Allocator,    
 
-        pub fn init(allocator: Allocator) Self {
-            return Self{ .allocator = allocator };
+        storage: StorageType,
+
+        default: bool,
+
+        pub fn init(allocator: ?Allocator) Self {
+            return Self { 
+                .allocator = if(allocator) |a| a else GPA.allocator(),
+                .storage = StorageType.init(GPA.allocator()),
+                .default = if(allocator) |_| false else true,
+            };
         }
 
-        pub fn allocValues(self: SelfPtr, size: usize) ![]ValueType {
-            var values = try self.*.allocator.alloc(ValueType, size);
-            return values;
+        pub fn deinit(self: SelfPtr) void {
+            // free all existing allocations if they are not null
+            for(self.*.storage.items) |item| {
+                if(item) |alloc| { self.*.allocator.free(alloc); }
+            }
+            self.*.storage.deinit();
+
+            if(self.*.default) {
+                // probably could do something other than panic.
+                if (GPA.deinit() == .leak) { @panic("LEAK DETECTED"); }
+            }
         }
 
-        pub fn freeValues(self: SelfPtr, values: []ValueType) void {
-            self.*.allocator.free(values);
+        fn allocValues(self: SelfPtr, size: usize, old_index: ?usize) !IndexedAlloc {
+
+            // I'm using the old_index parameter to be able to re-use
+            // data members from the storage array. If for some reason
+            // the user is freeing and reallocating frequently, it
+            // would cause the storage to grow linearly over time.
+
+            // The public member functions need to do the heavy
+            // lifting of seeing if it's safe to assign new values
+
+            if(size == 0) {
+                return AllocatorError.TensorSizeZero;
+            }
+
+            var alloc = try self.*.allocator.alloc(ValueType, size);
+
+            // if old_index is not null, check to see if it fits
+            // fits the storage capacity to re-use existing item
+            if(old_index) |index| {
+                if(index <= self.*.storage.items.len) {
+                    // reuse existing storage item if null
+                    if(self.*.storage.items[index] == null) {
+                        self.*.storage.items[index] = alloc;
+                        return IndexedAlloc{ .index = index, .alloc = alloc };
+                    }
+                }
+            }
+            // if old_index was null or was larger than
+            // the storage capacity, append a new item
+            const index = self.*.storage.items.len;
+            try self.*.storage.append(alloc);
+            return IndexedAlloc{ .index = index, .alloc = alloc };
+        }
+
+        fn freeValues(self: SelfPtr, values: []ValueType, index: usize) !void {
+
+            // we need to check that the index is valid
+            // for the storage that we have and then
+            // see if the pointers are the same.
+
+            if(self.*.storage.items.len <= index) {
+                return AllocatorError.WrongAllocator;
+            }
+            if(self.*.storage.items[index]) |alloc| {
+                if(alloc.ptr != values.ptr){
+                    return AllocatorError.WrongAllocator;
+                }
+                self.*.storage.items[index] = null;
+                self.*.allocator.free(values);
+            }
+            else {
+                return AllocatorError.IndexAlreadyFreed;
+            }
         }
 
         pub fn allocToTensor(self: SelfPtr, tensor: anytype) !void {
+
+            // pretty simple, make a new allocation
+            // and then assign the storage index
+            
             if(tensor.*.valueSize() != 0) {
                 return AllocatorError.TensorHasAlloc;
             }
-            if(tensor.*.valueCapacity() == 0) {
-                return AllocatorError.TensorSizeZero;
-            } 
-            const size = sliceProduct(SizesType, tensor.*.sliceSizes());
-                        
-            tensor.*.values = try self.*.allocValues(size);
+            const capacity = tensor.*.valueCapacity();
+            
+            var indexed_alloc = try self.*.allocValues(
+                capacity, tensor.*.alloc_index 
+            );
+            tensor.*.values = indexed_alloc.alloc;
+            tensor.*.alloc_index = indexed_alloc.index;
         }
         
-        pub fn freeFromTensor(self: SelfPtr, tensor: anytype) void {
-            self.*.freeValues(tensor.*.releaseValues());            
-        }
+        pub fn freeFromTensor(self: SelfPtr, tensor: anytype) !void {
 
-        // I feel this function is justified because it not only
-        // provides syntactic sugar for the creating tensors, but
-        // it also ensures that the tensor's construction is valid.
+            // this function leaves the storage index intact so
+            // the same tensor can request allocations again
+
+            if(tensor.*.alloc_index) |index| {
+                try self.*.freeValues(tensor.*.values, index);
+                tensor.*.values = &[_]ValueType{ };
+            }
+            else {
+                return AllocatorError.WrongAllocator;
+            }
+        }
 
         pub fn allocTensor(
             self: SelfPtr, 
@@ -96,20 +193,27 @@ pub fn TensorAllocator(comptime value_type: type) type {
             if(size == 0) {
                 return AllocatorError.TensorSizeZero;
             } 
-            var data = try self.*.allocValues(size);
+            var indexed_alloc = try self.*.allocValues(size, null);
                         
-            return Tensor(ValueType, rank, order).init(data, sizes);
+            return Tensor(ValueType, rank, order) {
+                .values = indexed_alloc.alloc,
+                .sizes_and_strides = SizesAndStrides(rank, order).init(sizes),
+                .alloc_index = indexed_alloc.index,
+            };
         }
 
         pub fn copyTensor(self: SelfPtr, tensor: anytype) !@TypeOf(tensor.*) {
+
             const T = @TypeOf(tensor.*);
             
-            var values = try self.allocValues(tensor.*.valueSize());
+            var indexed_alloc = try self.allocValues(tensor.*.valueSize(), null);
 
-            @memcpy(values, tensor.*.values);
+            @memcpy(indexed_alloc.alloc, tensor.*.values);
 
-            return T { 
-                .values = values, .sizes_and_strides = tensor.*.sizes_and_strides
+            return T {
+                .values = indexed_alloc.alloc,
+                .sizes_and_strides = tensor.*.sizes_and_strides,
+                .alloc_index = indexed_alloc.index,
             };
         }
     };
@@ -117,42 +221,23 @@ pub fn TensorAllocator(comptime value_type: type) type {
 
 test "Allocate and Free" {
 
-    const std = @import("std");
-
     const expect = std.testing.expect;
-    
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
 
-    var factory = TensorAllocator(f32).init(GPA.allocator());
+    // null uses the general purpose allocator.
+    // It also means that it will call deinit
+    // on the gpa allocator when we call deinit.
+    var factory = TensorAllocator(f32).init(null);
 
     /////////////////////////////////////////
     { // assign into to tensor //////////////
-        var X = Tensor(f32, 2, Rowwise).init(
-            null, .{ 10, 10 }
-        );
+        var X = Tensor(f32, 2, Rowwise).init(null, .{ 10, 10 });
 
         // create 100 elements... 10x10
         try factory.allocToTensor(&X);
         try expect(X.valueSize() == 100);
 
         // tensor slice should be reset
-        factory.freeFromTensor(&X);
-        try expect(X.valueSize() == 0);
-    }
-
-    /////////////////////////////////////////
-    { // assign indirectly to tensor ////////
-        var X = Tensor(f32, 2, Rowwise).init(
-            null, .{ 10, 10 }
-        );
-
-        // create 100 elements... 10x10
-        var values = try factory.allocValues(X.valueCapacity());
-        try X.setValues(values);
-        try expect(X.valueSize() == 100);
-
-        // tensor slice should be reset
-        factory.freeValues(X.releaseValues());
+        try factory.freeFromTensor(&X);
         try expect(X.valueSize() == 0);
     }
 
@@ -164,7 +249,7 @@ test "Allocate and Free" {
         try expect(X.valueSize() == 100);
 
         // tensor slice should be reset
-        factory.freeFromTensor(&X);
+        try factory.freeFromTensor(&X);
         try expect(X.valueSize() == 0);
     }
     /////////////////////////////////////////
@@ -177,12 +262,25 @@ test "Allocate and Free" {
         try expect(Y.valueSize() == 100);
 
         // tensor slice should be reset
-        factory.freeFromTensor(&X);
-        factory.freeFromTensor(&Y);
+        try factory.freeFromTensor(&X);
+        try factory.freeFromTensor(&Y);
 
         try expect(X.valueSize() == 0);
         try expect(Y.valueSize() == 0);
     }
+
     
-    if (GPA.deinit() == .leak) { @panic("LEAK DETECTED"); }
+    // make 3 tensors and do not free them
+    var X = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
+    var Y = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
+    var Z = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
+
+    // trivial operation to avoid compile error
+    X.setValue(3, .{0, 1});
+    Y.setValue(3, .{0, 1});
+    Z.setValue(3, .{0, 1});
+
+    // factory will free X Y Z automatically
+    // and this will panic if test fails
+    factory.deinit();
 }

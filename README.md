@@ -43,10 +43,8 @@ try X.permutate(.{1, 0}); // transpose tensor...
 Using the TensorAllocator is easy and intuitive and designed to work with Tensor objects:
 
 ```zig
-var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
-
-// Accepts standard conforming allocator.
-var allocator = TensorAllocator(f32).init(GPA.allocator());
+// null will automatically use the GPA allocator.
+var allocator = TensorAllocator(f32).init(null);
 
 // Option 1: assign memory into existing tensor.
 var X = Tensor(f32, 2, Rowwise).init(null, .{ 10, 10 });
@@ -56,17 +54,16 @@ try allocator.allocToTensor(&X); // alloc 100 elements...
 // Option 2: assign a new tensor from allocator.
 var Y = try allocator.allocTensor(2, Rowwise, .{10, 10});
 
-// Deallocate tensor values...
-allocator.freeFromTensor(&X); // free and reset X...
-allocator.freeFromTensor(&Y); // free and reset Y...
+// Automatically deallocate tensor values!
+allocator.deinit();
 ```
 
-# Memory owernship and viewership
+# Memory Owernship and Viewership
 Currently, tensor permutations only change the indexing of a tensor - they do not
-invalidate underyling memory. There will be support for data transformations as well,
-but they will be in the form of free functions with descriptive names. Until then,
-tensor member functions do not mutate underlying memory, so different tensors can
-view the same data in a variety of ways safely.
+invalidate underyling memory. If the user chooses to use the TensorAllocator,
+it will track allocations and delete them automatically when calling deinit.
+V1 is only tested on single thread environments - thread safefty with allocators
+will be coming in a later version!
 
 # Additonal functionality coming soon.
 This library is still in the beginning phases. If you want to contribute, please

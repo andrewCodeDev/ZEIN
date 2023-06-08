@@ -15,8 +15,10 @@ pub const OrderType = enum {
 pub const Rowwise = OrderType.rowwise;
 pub const Colwise = OrderType.colwise;
 
+const SizesType = u32;
+
 pub const SizeAndStride = struct {
-    pub const ValueType = u32;
+    pub const ValueType = SizesType;
     size : ValueType = 0,
     stride : ValueType = 0
 };
@@ -24,9 +26,7 @@ pub const SizeAndStride = struct {
 /////////////////////////////////////////////////////////
 // Split SizeAndStrides into a contiguous segmented array
 
-inline fn unpackOptionalSizes(
-    comptime rank: usize, 
-    sizes: ?[rank]SizeAndStride.ValueType) [rank]SizeAndStride.ValueType {
+inline fn unpackOptionalSizes(comptime rank: usize,  sizes: ?[rank]SizesType) [rank]SizesType {
 
     if(sizes) |data| {
         return data;
@@ -39,11 +39,7 @@ inline fn unpackOptionalSizes(
 }
 
 
-fn inferStridesFromSizes(
-        comptime rank: usize, 
-        comptime order: OrderType,
-        sizes: ?[rank]SizeAndStride.ValueType
-    ) [rank]SizeAndStride.ValueType {
+fn inferStridesFromSizes(comptime rank: usize, comptime order: OrderType, sizes: ?[rank]SizesType) [rank]SizesType {
     
     var strides : [rank]SizeAndStride.ValueType = undefined;
 
@@ -80,9 +76,9 @@ fn inferStridesFromSizes(
     return strides;
  }
 
-pub fn defaultPermutation(comptime rank: usize, comptime T: type) [rank]T {
-    var tmp: [rank]T = undefined;
-    var i: T = 0;
+pub fn defaultPermutation(comptime rank: usize) [rank]SizesType {
+    var tmp: [rank]SizesType = undefined;
+    var i: SizesType = 0;
     while(i < rank) : (i += 1) { tmp[i] = i; }
     return tmp;
 }
@@ -96,15 +92,15 @@ pub fn defaultPermutation(comptime rank: usize, comptime T: type) [rank]T {
 
         const Rank = rank;
 
-        const Order = order;
-
         const Self = @This();
 
         const SelfPtr = *Self;
 
+        const Order = order;
+
         const ConstSelfPtr = *const Self;
 
-        pub const ValueType = SizeAndStride.ValueType;
+        pub const ValueType = SizesType;
     
         sizes: [Rank]ValueType = undefined,
         strides: [Rank]ValueType = undefined,
@@ -114,7 +110,7 @@ pub fn defaultPermutation(comptime rank: usize, comptime T: type) [rank]T {
             return Self {
                 .sizes = unpackOptionalSizes(Rank, sizes),
                 .strides = inferStridesFromSizes(Rank, Order, sizes),
-                .permutation = defaultPermutation(rank, ValueType)
+                .permutation = defaultPermutation(Rank)
             };
         }
         
@@ -136,7 +132,7 @@ test "Initialization" {
     const std = @import("std");
 
     var s1 = SizesAndStrides(5, Rowwise).init(
-            .{ 100, 101, 102, 103, 104, }
+            .{ 100, 101, 102, 103, 104 }
         );
 
     var s2 = SizesAndStrides(5, Rowwise).init(null);
@@ -164,8 +160,8 @@ test "Rowwise/Colwise Ordering" {
 
     const std = @import("std");
 
-    {
-        var s1 = SizesAndStrides(3, Rowwise).init(.{ 100, 101, 102, });
+    { ////////////////////////////////////////////
+        var s1 = SizesAndStrides(3, Rowwise).init(.{ 100, 101, 102 });
         try std.testing.expect(s1.sizes[0] == 100);
         try std.testing.expect(s1.sizes[1] == 101);
         try std.testing.expect(s1.sizes[2] == 102);
@@ -173,8 +169,8 @@ test "Rowwise/Colwise Ordering" {
         try std.testing.expect(s1.strides[1] == 102);
         try std.testing.expect(s1.strides[2] ==   1);
     } 
-    {
-        var s1 = SizesAndStrides(3, Colwise).init(.{ 100, 101, 102, });
+    { ////////////////////////////////////////////
+        var s1 = SizesAndStrides(3, Colwise).init(.{ 100, 101, 102 });
         try std.testing.expect(s1.sizes[0] == 100);
         try std.testing.expect(s1.sizes[1] == 101);
         try std.testing.expect(s1.sizes[2] == 102);

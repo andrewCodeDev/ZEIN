@@ -131,12 +131,19 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         const ConstSelfPtr = *const Self;
 
         values : ValueSlice,
+
         sizes_and_strides : SizesAndStridesType,
+        
+        // This is assigned by the TensorAllocator to
+        // give fast, dependable lookup for tensor
+        // deallocation. Do not assign to it directly.
+        alloc_index: ?usize,
 
         pub fn init(values: ?ValueSlice, sizes: ?[Rank]SizesType) Self {
             return Self {
                 .values = if (values) |vs| (vs) else &[_]ValueType{ },
                 .sizes_and_strides = SizesAndStridesType.init(sizes),
+                .alloc_index = null,
             };
         }
 
@@ -181,18 +188,19 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // that an operation they are about to do could
         // invalidate a tensor in some way.
         
-        // to use this function safely, check that both slice lenghts are
-        // the same and that the capacity is equal to the value length
-        pub fn setValuesUnchecked(self: SelfPtr, values: ValueSlice) void {
-            self.*.values = values;
-        }
-
         // to use this function safely, check that both tensor value
         // sizes are the same and that both tensors are at capacity
         pub fn swapValuesUnchecked(self: SelfPtr, other: SelfPtr) void {
-            var tmp = self.*.values;
+            var values = self.*.values;
+            var index = self.*.alloc_index;
+
+            // assign values and index from other
             self.*.values = other.*.values;
-            other.*.values = tmp;
+            self.*.alloc_index = other.*.alloc_index;
+
+            // assign values and index to other
+            other.*.values = values;
+            other.*.alloc_index = index;
         }
 
         // to use this function safely, check that the both tensors are at capacity
@@ -222,15 +230,6 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         // are true. Otherwise, they return errors and do not
         // perform the operation. This is to prevent leaving
         // tensors in an invalid state after the operation.
-
-        pub fn setValues(self: SelfPtr, values: ValueSlice) !void {
-            // to assure that sizes and strides are not
-            // invalidated, we check size and capacity
-            if(self.*.valueCapacity() != values.len){
-                return TensorError.AllocSizeMismatch;
-            }
-            self.*.setValuesUnchecked(values);
-        }
 
         pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
             // to assure that sizes and strides are not
@@ -277,13 +276,6 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
                 return TensorError.InvalidPermutation;
             }
             self.*.permutateUnchecked(permutation);
-        }
-
-        // The user is expected to manage the values after releasing them.
-        pub fn releaseValues(self: SelfPtr) ValueSlice {
-            var tmp = self.*.values;
-            self.*.values = &[_]ValueType{};
-            return tmp;
         }
 
         /////////////////////////////////////////////////
