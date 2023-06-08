@@ -1,24 +1,11 @@
 # ZEIN
-Zig-based implementation of tensors
-
-# Using the Zein library
-
-The main ZEIN/Zein.zig file provides an interface for the library implementation.
-
-The implementations are in the Core folder. They will be labled as "VX" where X is the verion number.
-
-This enables swapping out the implentation for providing variable behavior based on the Core version that is being used.
-This helps with backwards compatibility as this library may be aggressively changed. Likewise, some decisions may not be supported on all 
-architectures (AVX or CUDA, for instance).
-
-Currently, V1 requires AVX support. Accomodations will be provided as the library develops.
+Zig-based implementation of general-rank tensors! [1, 64)
 
 # Using Tensor Objects
 
 This library currently supports tensors within rank [1, 64). 
 
 Tensors can be created in the following way:
-
 
 ```zig
 const Tensor = @import("ZEIN/Zein.zig").Tensor;
@@ -57,6 +44,15 @@ var Y = try allocator.allocTensor(2, Rowwise, .{10, 10});
 // Automatically deallocate tensor values!
 allocator.deinit();
 ```
+# Using the Zein library
+
+The main ZEIN/Zein.zig file provides an interface for the library implementation.
+
+The implementations are in the Core folder. They will be labled as "VX" where X is the verion number.
+
+This enables swapping out the implentation for providing variable behavior based on the Core version that is being used.
+This helps with backwards compatibility as this library may be aggressively changed. Likewise, some decisions may not be supported on all 
+architectures (AVX or CUDA, for instance).
 
 # Memory Owernship and Viewership
 Currently, tensor permutations only change the indexing of a tensor - they do not
