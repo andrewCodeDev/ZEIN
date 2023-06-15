@@ -55,22 +55,25 @@ inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
     if(op == ReduceOp.Add) {
         return 0; // implicit cast
     }
-    if(op == ReduceOp.Mul) {
+    else if(op == ReduceOp.Mul) {
         return 1; // implicit cast
     }
-    if(op == ReduceOp.Min) {
+    else if(op == ReduceOp.Min) {
         if(c == 102) { // "f"
             return math.floatMax(T);
         } else {
             return math.maxInt(T);
         }
     }
-    if(op == ReduceOp.Max) {
+    else if(op == ReduceOp.Max) {
         if(c == 102) { // "f"
             return math.floatMin(T);
         } else {
             return math.minInt(T);
         }
+    }
+    else {
+        @compileError("Unknown Operation type for initial value.");
     }
 }
 
