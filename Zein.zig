@@ -18,3 +18,14 @@ pub const Colwise = TensorVersion.Colwise;
 const TensorAllocatorVersion = @import("Core/V1/TensorAllocator.zig");
 pub const TensorAllocator = TensorAllocatorVersion.TensorAllocator;
 pub const AllocatorError = TensorAllocatorVersion.AllocatorError;
+
+// import core TensorOps version
+const TensorOpsVersion = @import("Core/V1/TensorOps.zig");
+pub const sum = TensorOpsVersion.sum;
+pub const sumUnchecked = TensorOpsVersion.sumUnchecked;
+pub const product = TensorOpsVersion.product;
+pub const productUnchecked = TensorOpsVersion.productUnchecked;
+pub const min = TensorOpsVersion.min;
+pub const minUnchecked = TensorOpsVersion.minUnchecked;
+pub const max = TensorOpsVersion.max;
+pub const maxUnchecked = TensorOpsVersion.maxUnchecked;
