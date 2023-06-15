@@ -56,7 +56,7 @@ architectures (AVX or CUDA, for instance).
 Currently, tensor permutations only change the indexing of a tensor - they do not
 invalidate underyling memory. If the user chooses to use the TensorAllocator,
 it will track allocations and delete them automatically when calling deinit.
-V1 is only tested on single thread environments - thread safefty with allocators
+V1 is only tested on single thread environments - thread safety with allocators
 will be coming in a later version!
 
 # Additonal functionality coming soon.
