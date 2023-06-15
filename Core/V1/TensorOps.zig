@@ -348,6 +348,99 @@ inline fn recursivePermutateValues(
     }
 }
 
+/////////////////////////////////////////////////////////////
+// This is the naive version of a general tensor permutation.
+// In the future, I plan on making more optimal versions of
+// this, but it's reliable baseline for future work.
+//
+// If all goes well, it will unroll to something like this:
+//
+//    for i..I
+//        indices[0] = i
+//        for j..J
+//            indices[1] = j
+//                ...
+//                for n..N
+//                    scratch[count] = x.getValue(indices);
+//                    count += 1
+//
+
+inline fn recursiveContraction(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime XR: usize, // tensor x rank
+    comptime YR: usize, // tensor y rank
+    comptime I: usize, // starting index
+    x: anytype, // source tensor
+    y: anytype, // destination memory
+    xc: *[XR]IT, // index container
+    yc: *[YR]IT, // index container
+    ci: *[XR]IT // contraction indices
+) void {
+
+    if(XR <= YR) {
+        @compileError("Contraction must go from a larger tensor to a smaller one.");
+    }
+
+    @memset(y.values, 0);
+    
+    if(I < YR) {
+
+        // this first branch loads up the x and y indices
+        // and passes them to the next loop. In this case,
+        // I is still in bounds of both x and y ranks.
+        
+        var i: IT = 0;
+        while(i < x.getSize(ci[I])) : (i += 1) {
+            
+            xc[I] = i; 
+            yc[I] = i; 
+            
+            @call(.always_inline, recursiveContraction, .{
+                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, ci
+            });
+        }
+    }
+
+    else if ((YR <= I) and (I < (XR - 1))) {
+
+        // the second branch deals with values of I that are
+        // out-of-bounds for y rank, but still in-bounds for
+        // the x rank.
+        
+        var i: IT = 0;
+        while(i < x.getSize(ci[I])) : (i += 1) {
+            
+            xc[I] = i; 
+            
+            @call(.always_inline, recursiveContraction, .{
+                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, ci
+            });
+        }
+    }
+
+    if(I == (XR - 1)) {
+
+        // the third branch deals with summing up the contracted
+        // indices and writing them to the related y index
+        
+        const x_ss : @Vector(XR, IT) = x.*.sizes_and_strides.strides;
+
+        var i: IT = 0;
+        var t: VT = 0;
+        while(i < x.getSize(ci[I])) : (i += 1) {
+            xc[I] = i;
+            const x_c : @Vector(XR, IT) = xc.*;
+            const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
+            t += x.values[x_i]; // accumulate summations
+        }
+        const y_ss : @Vector(XR, IT) = y.sizes_and_strides.strides;
+        const y_c : @Vector(XR, IT) = yc.*;
+        const y_i = @reduce(ReduceOp.Add, y_c * y_ss);
+        y.values[y_i] += t;
+    }
+}
+
 fn loopReduce(
     comptime ScalarFunc: anytype, 
     x: anytype,
