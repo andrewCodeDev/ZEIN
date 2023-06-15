@@ -349,21 +349,25 @@ inline fn recursivePermutateValues(
 }
 
 /////////////////////////////////////////////////////////////
-// This is the naive version of a general tensor permutation.
+// This is the naive version of a general tensor contraction.
 // In the future, I plan on making more optimal versions of
 // this, but it's reliable baseline for future work.
 //
 // If all goes well, it will unroll to something like this:
 //
 //    for i..I
-//        indices[0] = i
+//        x_indices[0] = i
+//        y_indices[0] = i
 //        for j..J
-//            indices[1] = j
+//            x_indices[1] = j
+//            y_indices[1] = j
 //                ...
 //                for n..N
-//                    scratch[count] = x.getValue(indices);
-//                    count += 1
-//
+//                    x_indices[I] = n;
+//                    y[y_indices] += x.getValue(x_indices);
+
+///////////////////////////////////////////////////////
+// THIS FUNCTION IS STILL EXPERIMENTAL (testing soon).
 
 inline fn recursiveContraction(
     comptime VT: type, // value type
@@ -532,17 +536,17 @@ test "vectorized reduce" {
         try std.testing.expectEqual(y, 10000);
     }
     { // reduce product of 10'000 elements
-        const y = product(&x);
+        const y = try product(&x);
         try std.testing.expectEqual(y, 1);
     }
     { // reduce max of 10'000 elements
         x.setValue(999, .{24, 62});
-        const y = max(&x);
+        const y = try max(&x);
         try std.testing.expectEqual(y, 999);
     }
     { // reduce max of 10'000 elements
         x.setValue(-999, .{92, 10});
-        const y = min(&x);
+        const y = try min(&x);
         try std.testing.expectEqual(y, -999);
     }
     factory.deinit();
