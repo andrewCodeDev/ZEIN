@@ -372,6 +372,136 @@ inline fn recursivePermutateValues(
 ///////////////////////////////////////////////////////
 // THIS FUNCTION IS STILL EXPERIMENTAL (testing soon).
 
+pub fn contraction(comptime str: [] const u8, x: anytype, y: anytype) !void {
+
+    const XT = @TypeOf(x.*);
+    const YT = @TypeOf(y.*);
+    const ip = contractionParse(XT.Rank, YT.Rank, str);
+
+    var xc: [XT.Rank]XT.SizesType = undefined;
+    var yc: [YT.Rank]YT.SizesType = undefined;
+    
+    @memset(y.values, 0);
+    
+    @call(.always_inline, recursiveContraction, .{
+        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, 0, x, y, &xc, &yc, &ip.lhs, &ip.rhs
+    });
+}
+
+fn IndicesPair(comptime lRank: usize, comptime rRank: usize) type {
+    return struct {
+        lhs : [lRank]SizeAndStrideType = undefined,
+        rhs : [rRank]SizeAndStrideType = undefined,
+    };
+}
+    
+fn contractionParse(
+    comptime lRank: usize,
+    comptime rRank: usize,
+    comptime str: [] const u8
+) IndicesPair(lRank, rRank) {
+    comptime var index: usize = 0;
+
+    // reference for array operator
+    const arrow: [] const u8 = "->";
+
+    comptime var a: usize = 0;
+    comptime var b: usize = 0;
+
+    // mark one before the arrow and one after the arrow
+    inline while(index < str.len) : (index += 1) {
+        if(str[index] == arrow[0]) { a = index; }
+        if(str[index] == arrow[1]) { b = index; }
+    }
+
+    ///////////////////////////////////////
+    // check for valid infix arrow operator
+
+    if((a + 1) != b) {
+        @compileError("Malformed arrow operator: " ++ str);
+    }
+    if(a == 0 or b > (str.len - 2)) {
+        @compileError("Arrow must be used as infix operator: " ++ str);
+    }
+
+    const lhs = str[0..a];
+    const rhs = str[b+1..];
+
+    if (lhs.len == 0) {
+        @compileError("Empty left-side operand: " ++ str);
+    }
+    if (rhs.len == 0) {
+        @compileError("Empty right-side operand: " ++ str);
+    }
+    if(lhs.len != lRank) {
+        @compileError("Provided indices do not match left-side operand rank: " ++ lhs);
+    }
+    if(rhs.len != rRank) {
+        @compileError("Provided indices do not match right-side operand rank: " ++ rhs);
+    }
+
+    ////////////////////////////////////////
+    // build permutation contraction indices
+
+    comptime var x_indices: [lhs.len]u32 = undefined;
+    comptime var y_indices: [rhs.len]u32 = undefined;
+    comptime var remainder: [lhs.len + rhs.len]u32 = undefined;
+    comptime var char: u8 = undefined;
+    comptime var match: u32 = 0;
+    comptime var rhs_i: u32 = 0;
+    comptime var rem_i: u32 = 0;
+    comptime var found: bool = false;
+
+    index = 0;
+    inline while(index < lhs.len) : (index += 1) {
+
+        // matched + unmatched = total
+        if(match == rhs.len and rem_i == remainder.len) {
+             break; 
+        }
+
+        char = lhs[index];
+
+        found = false;
+
+        // try to match the current char
+        // in both rhs and lhs operands
+        
+        rhs_i = 0;
+        inline while(rhs_i < rhs.len) : (rhs_i += 1) {
+            if (rhs[rhs_i] == char) {
+                x_indices[match] = index;
+                y_indices[match] = rhs_i;
+                found = true;
+                match += 1;
+                break;
+            }
+        }
+
+        // if no match, add to remainder
+        
+        if(!found) {
+            remainder[rem_i] = index;
+            rem_i += 1;
+        }
+    }
+
+    if(match != rhs.len) {
+        @compileError("Unmatched dimensions between operands:" ++ str);
+    }
+
+    rem_i = 0;
+    index = rhs.len;
+    inline while(index < lhs.len) : ({ index += 1; rem_i += 1; }){
+        x_indices[index] = remainder[rem_i];
+    }
+    
+    // comptime variables have static lifetimes...
+    return IndicesPair(lRank, rRank){ .lhs = x_indices, .rhs = y_indices };
+}
+
+const print = @import("std").debug.print;
+
 inline fn recursiveContraction(
     comptime VT: type, // value type
     comptime IT: type, // int type
@@ -382,29 +512,31 @@ inline fn recursiveContraction(
     y: anytype, // destination memory
     xc: *[XR]IT, // index container
     yc: *[YR]IT, // index container
-    ci: *[XR]IT // contraction indices
+    xp: *const [XR]IT, // contraction indices
+    yp: *const [YR]IT // contraction indices
 ) void {
 
     if(XR <= YR) {
         @compileError("Contraction must go from a larger tensor to a smaller one.");
     }
 
-    @memset(y.values, 0);
-    
     if(I < YR) {
+
+        const x_perm_index = xp[I];
+        const y_perm_index = yp[I];
 
         // this first branch loads up the x and y indices
         // and passes them to the next loop. In this case,
         // I is still in bounds of both x and y ranks.
         
         var i: IT = 0;
-        while(i < x.getSize(ci[I])) : (i += 1) {
+        while(i < x.getSize(x_perm_index)) : (i += 1) {
             
-            xc[I] = i; 
-            yc[I] = i; 
+            xc[x_perm_index] = i; 
+            yc[y_perm_index] = i; 
             
             @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, ci
+                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, xp, yp
             });
         }
     }
@@ -414,37 +546,41 @@ inline fn recursiveContraction(
         // the second branch deals with values of I that are
         // out-of-bounds for y rank, but still in-bounds for
         // the x rank.
+
+        const x_perm_index = xp[I];
         
         var i: IT = 0;
-        while(i < x.getSize(ci[I])) : (i += 1) {
+        while(i < x.getSize(x_perm_index)) : (i += 1) {
             
-            xc[I] = i; 
+            xc[x_perm_index] = i; 
             
             @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, ci
+                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, xp, yp
             });
         }
     }
 
-    if(I == (XR - 1)) {
+    else {
 
         // the third branch deals with summing up the contracted
         // indices and writing them to the related y index
         
         const x_ss : @Vector(XR, IT) = x.*.sizes_and_strides.strides;
 
+        const x_perm_index = xp[I];
+
         var i: IT = 0;
         var t: VT = 0;
-        while(i < x.getSize(ci[I])) : (i += 1) {
-            xc[I] = i;
+        while(i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
             const x_c : @Vector(XR, IT) = xc.*;
             const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
             t += x.values[x_i]; // accumulate summations
         }
-        const y_ss : @Vector(XR, IT) = y.sizes_and_strides.strides;
-        const y_c : @Vector(XR, IT) = yc.*;
+        const y_ss : @Vector(YR, IT) = y.sizes_and_strides.strides;
+        const y_c : @Vector(YR, IT) = yc.*;
         const y_i = @reduce(ReduceOp.Add, y_c * y_ss);
-        y.values[y_i] += t;
+        y.*.values[y_i] += t;
     }
 }
 
@@ -580,6 +716,36 @@ test "Permutate Values" {
     try std.testing.expectEqual(x.values[6], 3);
     try std.testing.expectEqual(x.values[7], 6);
     try std.testing.expectEqual(x.values[8], 9);
+
+    factory.deinit();
+}
+
+test "contraction" {
+    const std = @import("std");
+
+    var factory = TensorAllocator(i32).init(null);
+    // need a more convincing test
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+    var y = try factory.allocTensor(1, Rowwise, .{ 3 });
+
+    @memset(x.values, 1);
+
+    try contraction("ijk->i", &x, &y);
+
+    std.testing.expectEqual(3.0, y.values[0]);
+    std.testing.expectEqual(3.0, y.values[1]);
+    std.testing.expectEqual(3.0, y.values[2]);
+
+    var z = try factory.allocTensor(1, Rowwise, .{ 4 });
+
+    try contraction("ijk->j", &x, &z);
+
+    std.testing.expectEqual(9.0, z.values[0]);
+    std.testing.expectEqual(9.0, z.values[1]);
+    std.testing.expectEqual(9.0, z.values[2]);
+    std.testing.expectEqual(9.0, z.values[3]);
+    std.debug.print("\n\n", .{});
 
     factory.deinit();
 }
