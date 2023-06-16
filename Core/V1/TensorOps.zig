@@ -727,28 +727,29 @@ test "contraction" {
     // need a more convincing test
 
     var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-    var y = try factory.allocTensor(1, Rowwise, .{ 3 });
 
     @memset(x.values, 1);
 
+    var y = try factory.allocTensor(1, Rowwise, .{ 3 });
+
     try contraction("ijk->i", &x, &y);
 
-    std.testing.expectEqual(3.0, y.values[0]);
-    std.testing.expectEqual(3.0, y.values[1]);
-    std.testing.expectEqual(3.0, y.values[2]);
+    try std.testing.expectEqual(y.values[0], 12);
+    try std.testing.expectEqual(y.values[1], 12);
+    try std.testing.expectEqual(y.values[2], 12);
 
     var z = try factory.allocTensor(1, Rowwise, .{ 4 });
 
     try contraction("ijk->j", &x, &z);
 
-    std.testing.expectEqual(9.0, z.values[0]);
-    std.testing.expectEqual(9.0, z.values[1]);
-    std.testing.expectEqual(9.0, z.values[2]);
-    std.testing.expectEqual(9.0, z.values[3]);
-    std.debug.print("\n\n", .{});
+    try std.testing.expectEqual(z.values[0], 9);
+    try std.testing.expectEqual(z.values[1], 9);
+    try std.testing.expectEqual(z.values[2], 9);
+    try std.testing.expectEqual(z.values[3], 9);
 
     factory.deinit();
 }
+
 // We're going to use insertion sort to figure out
 // which stride is the smallest so we can create
 // an efficient permutation-order array.
