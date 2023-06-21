@@ -390,8 +390,6 @@ pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !vo
     });
 }
 
-const print = @import("std").debug.print;
-
 inline fn recursiveContraction(
     comptime VT: type, // value type
     comptime IT: type, // int type
