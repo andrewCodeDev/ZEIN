@@ -52,7 +52,7 @@ The operations use compile time strings as einsum notation:
 
 ```zig
 // Transpose/permutate tensor views (does not modify underlying data).
-var y = try x.permutate("ijk-kji");
+var y = try x.permutate("ijk->kji");
 ```
 ```zig
 // Collapse tensor values using contraction:
