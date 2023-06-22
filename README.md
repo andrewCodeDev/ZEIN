@@ -45,21 +45,22 @@ factory.deinit();
 Tensor operations are are in the form of either free functions or factory functions:
 
         - Free functions require operands and the destination tensors.
+
         - Factory functions use operands to create the destination tensor.
 
-The operations interface uses einsum notation:
+The operations use compile time strings as einsum notation:
 
 ```zig
 // Transpose/permutate tensor views (does not modify underlying data).
 var y = try x.permutate("ijk-kji");
 ```
 ```zig
-// Basic vectorized reduction functions (sum, product, min, max):
-const s = try zein.sum(&x);
-```
-```zig
 // Collapse tensor values using contraction:
 try zein.contraction("ijk->ji", &x, &y);
+```
+```zig
+// Elementary vectorized reduction functions (sum, product, min, max):
+const s = try zein.sum(&x);
 ```
 
 # Using the Zein library
