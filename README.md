@@ -42,11 +42,11 @@ factory.deinit();
 ```
 
 # Tensor Operations
-Tensor operations are are in the form of either free functions or factory functions:
+Tensor operations are are in the form of either _Free Functions_ or _Factory Functions_:
 
-        - Free functions require operands and the destination tensor.
+        - Free Functions require operands and the destination tensor.
 
-        - Factory functions use operands to create the destination tensor.
+        - Factory Functions use operands to create the destination tensor.
 
 The operations use compile time strings as einsum notation:
 
