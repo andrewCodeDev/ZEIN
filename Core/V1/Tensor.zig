@@ -120,13 +120,23 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             };
         }
 
-        pub fn sliceSizes(self: ConstSelfPtr) [] const SizesType {
+        pub fn sliceSizes(self: ConstSelfPtr, i: usize, j: usize) [] const SizesType {
+            return &self.sizes_and_strides.sizes[i..j];
+        }
+        pub fn sliceStrides(self: ConstSelfPtr, i: usize, j: usize) [] const SizesType {
+            return &self.sizes_and_strides.strides[i..j];
+        }
+        pub fn slicePermutation(self: ConstSelfPtr, i: usize, j: usize) [] const SizesType {
+            return &self.sizes_and_strides.permutation[i..j];
+        }
+
+        pub fn getSizes(self: ConstSelfPtr) [] const SizesType {
             return &self.sizes_and_strides.sizes;
         }
-        pub fn sliceStrides(self: ConstSelfPtr) [] const SizesType {
+        pub fn getStrides(self: ConstSelfPtr) [] const SizesType {
             return &self.sizes_and_strides.strides;
         }
-        pub fn slicePermutation(self: ConstSelfPtr) [] const SizesType {
+        pub fn getPermutation(self: ConstSelfPtr) [] const SizesType {
             return &self.sizes_and_strides.permutation;
         }
         
@@ -190,10 +200,12 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
             self.swapSizesAndStridesUnchecked(other);
         }
 
-        // to use this function safely, check that each index from 0..Rank is present
-        pub fn permutateUnchecked(self: SelfPtr, permutation: [Rank]SizesType) void {
-            Permutate.permutateInput(Rank, Order, &self.sizes_and_strides, &permutation);
-            self.sizes_and_strides.permutation = permutation;
+        // to use this function safely, check that the source is
+        // valid to ensure that the resulting tensor is also valid.
+        pub fn permutateUnchecked(self: SelfPtr, comptime expression: [] const u8) Self {
+            var tmp = self.*; // share values and alloc_index!
+            Permutate.permutate(Rank, Order, expression, &tmp.sizes_and_strides);
+            return tmp;
         }
 
         ///////////////////////////////////////
@@ -236,19 +248,18 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         pub fn swap(self: SelfPtr, other: SelfPtr) !void {
             // Two tensors do not need to be the same size to be swapped.
             // They only need to both be valid tensors to prevent invalidation.
-
             if(!self.isValid() or !other.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
             self.swapUnchecked(other);
         }
 
-        pub fn permutate(self: SelfPtr, permutation: [rank]SizesType) !void {
-            // check that all indices are accounted for
-            if(!Permutate.checkBitwisePermutation(Rank, &permutation)){
-                return TensorError.InvalidPermutation;
+        pub fn permutate(self: SelfPtr, comptime expression: [] const u8) !Self {
+            // create a permutated tensor that shares the same underlying memory
+            if(!self.isValid()) {
+                return TensorError.InvalidTensorLayout;
             }
-            self.permutateUnchecked(permutation);
+            return self.permutateUnchecked(expression);
         }
 
         /////////////////////////////////////////////////
@@ -319,9 +330,7 @@ test "Tensor Transpose" {
 
     var data = [9]i32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
-    var x = Tensor(i32, 2, Rowwise).init(
-            &data, .{ 3, 3 }
-        );    
+    var x = Tensor(i32, 2, Rowwise).init(&data, .{ 3, 3 });    
 
     try expect(x.isValid());
 
@@ -335,15 +344,15 @@ test "Tensor Transpose" {
     try expect(x.getValue(.{2,1}) == 8);
     try expect(x.getValue(.{2,2}) == 9);
 
-    try x.permutate(.{1, 0});
+    var y = try x.permutate("ij->ji");
 
-    try expect(x.getValue(.{0,0}) == 1);
-    try expect(x.getValue(.{0,1}) == 4);
-    try expect(x.getValue(.{0,2}) == 7);
-    try expect(x.getValue(.{1,0}) == 2);
-    try expect(x.getValue(.{1,1}) == 5);
-    try expect(x.getValue(.{1,2}) == 8);
-    try expect(x.getValue(.{2,0}) == 3);
-    try expect(x.getValue(.{2,1}) == 6);
-    try expect(x.getValue(.{2,2}) == 9);
+    try expect(y.getValue(.{0,0}) == 1);
+    try expect(y.getValue(.{0,1}) == 4);
+    try expect(y.getValue(.{0,2}) == 7);
+    try expect(y.getValue(.{1,0}) == 2);
+    try expect(y.getValue(.{1,1}) == 5);
+    try expect(y.getValue(.{1,2}) == 8);
+    try expect(y.getValue(.{2,0}) == 3);
+    try expect(y.getValue(.{2,1}) == 6);
+    try expect(y.getValue(.{2,2}) == 9);
 }

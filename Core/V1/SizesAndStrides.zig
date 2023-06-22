@@ -8,8 +8,8 @@
 
 
 pub const OrderType = enum {
-    rowwise,
-    colwise,
+    rowwise, // rank > 0
+    colwise, // rank > 0
 };
 
 pub const Rowwise = OrderType.rowwise;

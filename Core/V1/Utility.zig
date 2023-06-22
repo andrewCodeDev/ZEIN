@@ -1,25 +1,26 @@
 
 const ReduceOp = @import("std").builtin.ReduceOp;
 
-pub fn arrayProduct(comptime rank: usize, comptime T: type, ints: *const [rank]T) T {
-    const s : @Vector(rank, T) = ints.*;
+pub fn arrayProduct(comptime rank: usize, comptime T: type, values: *const [rank]T) T {
+    const s : @Vector(rank, T) = values.*;
     return @reduce(ReduceOp.Mul, s);
 }
 
-pub fn arraySum(comptime rank: usize, comptime T: type, ints: *const [rank]T) T {
-    const s : @Vector(rank, T) = ints.*;
+pub fn arraySum(comptime rank: usize, comptime T: type, values: *const [rank]T) T {
+    const s : @Vector(rank, T) = values.*;
     return @reduce(ReduceOp.Sum, s);
 }
 
-pub fn sliceProduct(comptime T: type, ints: [] const T) T {
-    var total: T = @boolToInt(0 < ints.len);
-    for(ints) |n| { total *= n; }
+pub fn sliceProduct(comptime T: type, values: [] const T) T {
+    if(values.len == 0){ return 0; }
+    var total: T = 1;
+    for(values) |n| { total *= n; }
     return total;
 }
 
-pub fn sliceSum(comptime T: type, ints: [] const T) T {
+pub fn sliceSum(comptime T: type, values: [] const T) T {
     var total: T = 0;
-    for(ints) |n| { total += n; }
+    for(values) |n| { total += n; }
     return total;
 }
 

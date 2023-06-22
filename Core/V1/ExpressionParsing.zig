@@ -27,11 +27,68 @@ fn allAlpha(comptime str: [] const u8) bool {
     return true;
 }
 
+// check that a permutation is both full and accounted for
+fn isPermutation(comptime source: [] const u8, comptime target: [] const u8) bool {
+
+    if(source.len != target.len) {
+        return false;
+    }
+    if(source.len == 0) { // the empty set is a permutation of itself
+        return true;
+    }
+    // create mask for proper permutation
+    const full: usize = (1 << source.len) - 1;
+    comptime var i_mask: usize = 0;
+    comptime var j_mask: usize = 0;
+
+    comptime var i: usize = 0;
+    comptime var j: usize = 0;
+    inline while(i < source.len) : ({ i += 1; j = 0; }) {
+        inline while(j < target.len) : (j += 1) {
+            if(source[i] == target[j]) { 
+                i_mask |= (1 << i);
+                j_mask |= (1 << j); 
+            }
+        }
+    }
+    return i_mask == j_mask and i_mask == full;
+}
+
 pub fn IndicesPair(comptime lRank: usize, comptime rRank: usize) type {
     return struct {
         lhs : [lRank]SizesType = undefined,
         rhs : [rRank]SizesType = undefined,
     };
+}
+
+const ArrowOp = struct {
+    tail: usize = 0,
+    head: usize = 0,  
+};
+
+fn findArrowOp(str: [] const u8) ArrowOp { 
+    // reference for array operator
+    const arrow: [] const u8 = "->";
+
+    comptime var head: usize = 0;
+    comptime var tail: usize = 0;    
+    comptime var index: usize = 0;
+    inline while(index < str.len) : (index += 1) {
+        if(str[index] == arrow[0]) { tail = index; }
+        if(str[index] == arrow[1]) { head = index; }
+    }
+
+    ///////////////////////////////////////
+    // check for valid infix arrow operator
+
+    if((tail + 1) != head) {
+        @compileError("Malformed arrow operator: " ++ str);
+    }
+    if(tail == 0 or head > (str.len - 2)) {
+        @compileError("Arrow must be used as infix operator: " ++ str);
+    }
+
+    return ArrowOp{ .tail = tail, .head = head };
 }
 
 // Contraction parsing is expects strings of the form:
@@ -42,6 +99,49 @@ pub fn IndicesPair(comptime lRank: usize, comptime rRank: usize) type {
 // the right operand (denoting contracted indices).
 //
 // The left and right operands must be alpha-characters.
+
+pub fn permutateParse(
+    comptime Rank: usize,
+    comptime str: [] const u8
+) [Rank]SizesType {
+
+    const arrow = comptime findArrowOp(str);
+    const lhs = str[0..arrow.tail];
+    const rhs = str[arrow.head + 1..];
+
+    if(lhs.len != Rank) {
+        @compileError("Left operand is not equal to the rank: " ++ lhs);
+    }
+    if(rhs.len != Rank) {
+        @compileError("Right operand is not equal to the rank: " ++ rhs);
+    }
+    if(!comptime allAlpha(lhs)) {
+        @compileError("Non-alphabetical character found in: " ++ lhs);
+    }
+    if(!comptime allAlpha(rhs)) {
+        @compileError("Non-alphabetical character found in: " ++ rhs);
+    }
+    if(!comptime isPermutation(lhs, rhs)) {
+        @compileError("Permutate requires left and right operands to be permutations of eachother." ++ str);
+    }
+
+    ////////////////////////////////////////
+    // build permutation contraction indices
+
+    comptime var i: usize = 0;
+    comptime var j: usize = 0;
+    comptime var indices: [Rank]SizesType = undefined;
+
+    inline while(i < Rank) : ({ i += 1; j = 0; }) {
+        inline while(j < Rank) : (j += 1) {
+            if (rhs[i] == lhs[j]) {
+                indices[i] = j;
+                break;
+            }
+        }
+    }
+    return indices;
+}
 
 pub fn contractionParse(
     comptime lRank: usize,

@@ -14,10 +14,10 @@ pub const OrderType = TensorVersion.OrderType;
 pub const Rowwise = TensorVersion.Rowwise;
 pub const Colwise = TensorVersion.Colwise;
 
-// import core TensorAllocator version
-const TensorAllocatorVersion = @import("Core/V1/TensorAllocator.zig");
-pub const TensorAllocator = TensorAllocatorVersion.TensorAllocator;
-pub const AllocatorError = TensorAllocatorVersion.AllocatorError;
+// import core TensorFactory version
+const TensorFactoryVersion = @import("Core/V1/TensorFactory.zig");
+pub const TensorFactory = TensorFactoryVersion.TensorFactory;
+pub const AllocatorError = TensorFactoryVersion.AllocatorError;
 
 // import core TensorOps version
 const TensorOpsVersion = @import("Core/V1/TensorOps.zig");
@@ -29,3 +29,5 @@ pub const min = TensorOpsVersion.min;
 pub const minUnchecked = TensorOpsVersion.minUnchecked;
 pub const max = TensorOpsVersion.max;
 pub const maxUnchecked = TensorOpsVersion.maxUnchecked;
+pub const contraction = TensorOpsVersion.contraction;
+pub const contractionUnchecked = TensorOpsVersion.contractionUnchecked;
