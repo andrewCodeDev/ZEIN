@@ -44,7 +44,7 @@ factory.deinit();
 # Tensor Operations
 Tensor operations are are in the form of either free functions or factory functions:
 
-        - Free functions require operands and the destination tensors.
+        - Free functions require operands and the destination tensor.
 
         - Factory functions use operands to create the destination tensor.
 
