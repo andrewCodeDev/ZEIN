@@ -59,7 +59,7 @@ var y = try x.permutate("ijk->kji");
 ```
 ```zig
 // Collapse tensor values using contraction:
-try Zein.contraction("ijk->ji", &x, &y);
+try zein.contraction("ijk->ji", &x, &y);
 ```
 ```zig
 // Elementary vectorized reduction functions (sum, product, min, max):
