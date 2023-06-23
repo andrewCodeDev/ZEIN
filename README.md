@@ -2,44 +2,47 @@
 Zig-based implementation of general-rank tensors! [1, 64)
 
 # Using Tensor Objects
-
 Tensors can be created in the following way:
 
 ```zig
-const Tensor = @import("ZEIN/Zein.zig").Tensor;
-const Rowwise = @import("ZEIN/Zein.zig").Rowwise;
-
 // initialize underlying tensor memory:
-
 var data = [9]i32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
 // create a rank 2, 3x3, Rowwise tensor of i32 from data:
-
-var X = Tensor(i32, 2, Rowwise).init(
-        &data, .{ 3, 3 }
-    );    
+var X = Zein.Tensor(i32, 2, Rowwise).init(&data, .{ 3, 3 });    
 
 const x = X.getValue(.{0, 2}); // access value 3...
 ```
 
 # Allocating Tensor Data
-Using the TensorFactory is easy and intuitive and designed to work with generic allocators:
+The TensorFactory offers the ability to track and free allocations:
 
 ```zig
-// null will automatically use the GPA allocator.
-var factory = TensorFactory(f32).init(null);
+// null will automatically use the GPA allocator:
+var factory = Zein.TensorFactory(f32).init(null);
 
-// Option 1: assign memory into existing tensor.
+// Begin tracking tensor allocations (default is no-tracking):
+factory.tracking(.start);
+
+// Stop tracking tensor allocations (does not free tensors):
+factory.tracking(.stop);
+
+// Free tracked tensor allocations (no-op if no tensors are tracked):
+factory.tracking(.free);
+
+// Deinit will free the allocator and currently tracked tensors:
+factory.deinit();
+````
+```zig
+// Assign a new tensor from allocator:
+var Y = try factory.allocTensor(2, Rowwise, .{10, 10});
+```
+```zig
+// Assign memory into existing tensor:
 var X = Tensor(f32, 2, Rowwise).init(null, .{ 10, 10 });
 
 try factory.allocToTensor(&X); // alloc 100 elements...
-
-// Option 2: assign a new tensor from allocator.
-var Y = try factory.allocTensor(2, Rowwise, .{10, 10});
-
-// Automatically deallocate tensor values!
-factory.deinit();
-```
+````
 
 # Tensor Operations
 Tensor operations are are in the form of either _Free Functions_ or _Factory Functions_:
@@ -56,11 +59,11 @@ var y = try x.permutate("ijk->kji");
 ```
 ```zig
 // Collapse tensor values using contraction:
-try zein.contraction("ijk->ji", &x, &y);
+try Zein.contraction("ijk->ji", &x, &y);
 ```
 ```zig
 // Elementary vectorized reduction functions (sum, product, min, max):
-const s = try zein.sum(&x);
+const s = try Zein.sum(&x);
 ```
 
 # Using the Zein library
