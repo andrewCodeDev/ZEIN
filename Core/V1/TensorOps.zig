@@ -19,10 +19,13 @@ const TensorError = @import("Tensor.zig").TensorError;
 const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 const Colwise = @import("SizesAndStrides.zig").Colwise;
 const SizeAndStrideType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
-const defaultPermuation = @import("SizesAndStrides.zig").defaultPermutation;
 var GPA = @import("TensorFactory.zig");
 const ReduceOp = @import("std").builtin.ReduceOp;
 const math = @import("std").math;
+
+const defaultPermuation = @import("SizesAndStrides.zig").defaultPermutation;
+const contractionParse = @import("ExpressionParsing.zig").contractionParse;
+
 
 // The OpsPolicy controls the behavior of the math
 // class. This includes behavior such as whether or
@@ -221,8 +224,6 @@ pub inline fn recursivePermutate(
 
 ///////////////////////////////////////////////////////
 // THIS FUNCTION IS STILL EXPERIMENTAL (testing soon).
-
-const contractionParse = @import("ExpressionParsing.zig").contractionParse;
 
 pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !void {
 
