@@ -66,7 +66,7 @@ const ArrowOp = struct {
     head: usize = 0,  
 };
 
-fn findArrowOp(str: [] const u8) ArrowOp { 
+pub fn findArrowOp(str: [] const u8) ArrowOp { 
     // reference for array operator
     const arrow: [] const u8 = "->";
 
@@ -89,6 +89,10 @@ fn findArrowOp(str: [] const u8) ArrowOp {
     }
 
     return ArrowOp{ .tail = tail, .head = head };
+}
+
+pub fn contractedRank(comptime str: [] const u8) usize {
+    return (str.len - (comptime findArrowOp(str)).head) - 1;
 }
 
 // Contraction parsing is expects strings of the form:

@@ -15,21 +15,22 @@
 
 // Allocators still need to have the deinit() function called as per usual.
 
+// Zein import files...
 const std = @import("std");
-
 const Allocator = @import("std").mem.Allocator;
-
 const Tensor = @import("Tensor.zig").Tensor;
-
+const TensorError = @import("Tensor.zig").TensorError;
 const SizesAndStridesType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
 
-// Zein import files...
 const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
 const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
 const OrderType = @import("SizesAndStrides.zig").OrderType;
 const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 const Colwise = @import("SizesAndStrides.zig").Colwise;
-
+const Ops = @import("TensorOps.zig");
+const OpsError = @import("TensorOps.zig").OpsError;
+const contractionParse = @import("ExpressionParsing.zig").contractionParse;
+const contractedRank = @import("ExpressionParsing.zig").contractedRank;
 const sliceProduct = @import("Utility.zig").sliceProduct;
 
 pub const AllocatorError = error {
@@ -105,8 +106,8 @@ const TrackingMode = enum {
 //    start: no-op, m -> start
 //
 // if m == free: 
-//    m -> start: no-op, m -> start
-//    m -> stop: no-op, m -> free
+//    start: no-op, m -> start
+//    stop: no-op, m -> free
 
 pub fn TensorFactory(comptime value_type: type) type {
 
@@ -159,6 +160,9 @@ pub fn TensorFactory(comptime value_type: type) type {
             nullifyGpaIndex(self.gpa_index);
         }
 
+        ///////////////////////////////////
+        // private allocation functions ///
+
         fn allocValues(self: SelfPtr, size: usize) !ValueSlice {
 
             var alloc = try self.allocator.alloc(ValueType, size);
@@ -184,6 +188,9 @@ pub fn TensorFactory(comptime value_type: type) type {
             }
         }
 
+        ///////////////////////////////////
+        // Change the tracking mode ///////
+
         pub fn tracking(self: SelfPtr, mode: TrackingMode) void {
 
             if(self.tracking_mode == .free and mode == .stop) {
@@ -196,6 +203,9 @@ pub fn TensorFactory(comptime value_type: type) type {
             }
             self.tracking_mode = mode;
         }
+
+        //////////////////////////////////
+        // Tensor Allocation functions ///
 
         pub fn allocToTensor(self: SelfPtr, tensor: anytype) !void {
             if(tensor.*.valueSize() != 0) {
@@ -240,6 +250,77 @@ pub fn TensorFactory(comptime value_type: type) type {
                 .values = alloc, 
                 .sizes_and_strides = tensor.sizes_and_strides,
             };
+        }
+
+        /////////////////////////////
+        // Factory Math Functions ///
+
+        pub fn add(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
+            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+                @compileError("Addition requires operands to be of the same type.");
+            }
+            if(!x.isValid() or y.isValid()){
+                return TensorError.InvalidTensorLayout;
+            }
+            if(x.valueSize() != y.valueSize()){
+                return OpsError.UnequalSize;
+            }
+            var z = try self.allocTensor(
+                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
+            );
+            Ops.addUnchecked(x, y, &z); 
+            return z;
+        }
+
+        pub fn multiply(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
+            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+                @compileError("Multipication requires operands to be of the same type.");
+            }
+            if(!x.isValid() or y.isValid()){
+                return TensorError.InvalidTensorLayout;
+            }
+            if(x.valueSize() != y.valueSize()){
+                return OpsError.UnequalSize;
+            }
+            var z = try self.allocTensor(
+                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
+            );
+            Ops.multiplyUnchecked(x, y, &z); 
+            return z;
+        }
+
+        pub fn contraction(
+            self: SelfPtr, 
+            comptime expression: [] const u8, 
+            x: anytype
+            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+
+            if(!x.isValid()) {
+                return TensorError.InvalidTensorLayout;
+            }
+            const XRank = @TypeOf(x.*).Rank;
+            const YRank = comptime contractedRank(expression);
+
+            const ip = contractionParse(XRank, YRank, expression);
+
+            var y_ss: [YRank]SizesType = undefined;
+            {
+                var i: usize = 0;
+                while(i < YRank) : (i += 1) {
+                    y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
+                }
+            }
+            var y = try self.allocTensor(YRank, @TypeOf(x.*).Order, y_ss);
+
+            var xc: [XRank]SizesType = undefined;
+            var yc: [YRank]SizesType = undefined;
+            
+            @memset(y.values, 0);
+            
+            @call(.always_inline, Ops.recursiveContraction, .{
+                ValueType, SizesType, XRank, YRank, 0, x, &y, &xc, &yc, &ip.lhs, &ip.rhs
+            });
+            return y;
         }
     };
 }
@@ -307,5 +388,122 @@ test "Allocate and Free" {
 
     // factory will free X Y Z automatically
     // and this will panic if test fails
+    factory.deinit();
+}
+
+test "vectorized reduce" {
+
+    var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+    
+    var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
+    
+    @memset(x.values, 1);
+
+    { // reduce sum of 10'000 elements
+        const y = try Ops.sum(&x);
+        try std.testing.expectEqual(y, 10000);
+    }
+    { // reduce product of 10'000 elements
+        const y = try Ops.product(&x);
+        try std.testing.expectEqual(y, 1);
+    }
+    { // reduce max of 10'000 elements
+        x.setValue(999, .{24, 62});
+        const y = try Ops.max(&x);
+        try std.testing.expectEqual(y, 999);
+    }
+    { // reduce max of 10'000 elements
+        x.setValue(-999, .{92, 10});
+        const y = try Ops.min(&x);
+        try std.testing.expectEqual(y, -999);
+    }
+    factory.deinit();
+}
+
+test "contraction" {
+
+    var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+
+    @memset(x.values, 1);
+
+    var y = try factory.contraction("ijk->i", &x);
+
+    try std.testing.expectEqual(y.values[0], 12);
+    try std.testing.expectEqual(y.values[1], 12);
+    try std.testing.expectEqual(y.values[2], 12);
+
+    var z = try factory.contraction("ijk->j", &x);
+
+    try std.testing.expectEqual(z.values[0], 9);
+    try std.testing.expectEqual(z.values[1], 9);
+    try std.testing.expectEqual(z.values[2], 9);
+    try std.testing.expectEqual(z.values[3], 9);
+
+    factory.deinit();
+}
+
+
+test "contraction 2" {
+    var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
+    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
+
+    Ops.fill(&x, 1, 1);
+
+    try Ops.contraction("ijk->ij", &x, &y);
+
+    try std.testing.expectEqual(y.values[0], 6);
+    try std.testing.expectEqual(y.values[1], 15);
+    try std.testing.expectEqual(y.values[2], 24);
+    try std.testing.expectEqual(y.values[3], 33);
+    try std.testing.expectEqual(y.values[4], 42);
+    try std.testing.expectEqual(y.values[5], 51);
+    try std.testing.expectEqual(y.values[6], 60);
+    try std.testing.expectEqual(y.values[7], 69);
+    try std.testing.expectEqual(y.values[8], 78);
+    try std.testing.expectEqual(y.values[9], 87);
+    try std.testing.expectEqual(y.values[10], 96);
+    try std.testing.expectEqual(y.values[11], 105);
+
+    try Ops.contraction("ijk->ji", &x, &z);
+
+    try std.testing.expectEqual(z.values[0], 6);
+    try std.testing.expectEqual(z.values[1], 42);
+    try std.testing.expectEqual(z.values[2], 78);
+    try std.testing.expectEqual(z.values[3], 15);
+    try std.testing.expectEqual(z.values[4], 51);
+    try std.testing.expectEqual(z.values[5], 87);
+    try std.testing.expectEqual(z.values[6], 24);
+    try std.testing.expectEqual(z.values[7], 60);
+    try std.testing.expectEqual(z.values[8], 96);
+    try std.testing.expectEqual(z.values[9], 33);
+    try std.testing.expectEqual(z.values[10], 69);
+    try std.testing.expectEqual(z.values[11], 105);
+
+    try Ops.contraction("ijk->jk", &x, &z);
+
+    try std.testing.expectEqual(z.values[0], 39);
+    try std.testing.expectEqual(z.values[1], 42);
+    try std.testing.expectEqual(z.values[2], 45);
+    try std.testing.expectEqual(z.values[3], 48);
+    try std.testing.expectEqual(z.values[4], 51);
+    try std.testing.expectEqual(z.values[5], 54);
+    try std.testing.expectEqual(z.values[6], 57);
+    try std.testing.expectEqual(z.values[7], 60);
+    try std.testing.expectEqual(z.values[8], 63);
+    try std.testing.expectEqual(z.values[9], 66);
+    try std.testing.expectEqual(z.values[10], 69);
+    try std.testing.expectEqual(z.values[11], 72);
+
     factory.deinit();
 }

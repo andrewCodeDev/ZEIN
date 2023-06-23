@@ -16,7 +16,6 @@
 
 const Tensor = @import("Tensor.zig").Tensor;
 const TensorError = @import("Tensor.zig").TensorError;
-const TensorFactory = @import("TensorFactory.zig").TensorFactory;
 const Rowwise = @import("SizesAndStrides.zig").Rowwise;
 const Colwise = @import("SizesAndStrides.zig").Colwise;
 const SizeAndStrideType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
@@ -30,24 +29,12 @@ const math = @import("std").math;
 // not the class can allocate new tensors if output
 // tensors are are not provided
 
-const OpsError = error {
+pub const OpsError = error {
     UnequalSize,
     InvalidDimensions,
     InvalidSizes,
     SizeZeroTensor
 };
-
-pub const OpsPolicy = struct {
-    // Flag to allocate more scratch memory.
-    // Some ops work best with scratch memory.
-    alloc_scratch: bool = true,
-
-    // Flag to check arguments for validity.
-    validate_args: bool = true,
-};
-
-// This function detects which kind of number we're using and then
-// and then returns the proper initialization value for it.
 
 inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
 
@@ -156,156 +143,6 @@ pub fn fill(
     }
 }
 
-// The tensor Ops class is a heavier weight object. Some operatoins
-// fundamentally do best with scratch memory, especially as we move
-// towards gpu implementations. This class will handle any operations
-// that require scratch memory so the user doesn't have to babysit
-// the allocator. The OpsPolicy will determine what kinds of checks
-// need to be done.
-
-pub fn TensorOps(comptime value_type: type, comptime policy: OpsPolicy) type {
-
-    return struct {
-
-        const Self = @This();
-
-        const SelfPtr = *Self;
-
-        const ConstSelfPtr = *const Self;
-
-        const SizesType = SizeAndStrideType;
-
-        const ValueType = value_type;
-
-        const Policy = policy;
-
-        // The allocator data member is here incase
-        // a user does not provide enough memory
-        allocator: *TensorFactory(ValueType),
-
-        // Scratch memory for operations
-        scratch: []ValueType = &[_]ValueType{ },
-
-        alloc_index: ?usize,
-
-        pub fn init(allocator: *TensorFactory(ValueType)) Self {
-            return Self { .allocator = allocator, .alloc_index = null };
-        }
-
-        pub fn scratchSize(self: ConstSelfPtr) usize {
-            return self.scratch.len;
-        }
-
-        pub fn releaseScratch(self: SelfPtr) []ValueType {
-            var tmp = self.scratch;
-            self.scratch = &[_]ValueType{};
-            return tmp;
-        }        
-
-        pub fn resizeScratch(self: SelfPtr, size: usize) !void {
-            if(self.scratch.len == size) {
-                return;
-            }
-            if(self.alloc_index) |i| {
-                try self.allocator.freeValues(self.scratch, i);
-            }
-            var indexed_alloc = try self.allocator.allocValues(
-                size, self.alloc_index
-            );
-            self.alloc_index = indexed_alloc.index;
-            self.scratch = indexed_alloc.alloc;
-        }
-
-        //fn add(self: SelfPtr, X: anytype, Y: anytype, Z: anytype) !void {
-        //    const XT = @TypeOf(X.*);
-        //    const YT = @TypeOf(Y.*);
-
-        //    if(XT != YT) {
-        //        @compileError("Cannot add tensors of different types.");
-        //    }
-        //    if(XT.ValueType != ValueType) {
-        //        @compileError("Cannot add tensors of different value types.");
-        //    }
-        //    if(Policy.validate_args) {
-        //        if(!(X.isValid() and Y.isValid() and Z.isValid())){ 
-        //            return TensorError.InvalidTensorLayout; 
-        //        }
-        //        if(X.valueSize() != Y.valueSize() or X.valueSize() != Z.valueSize()) {
-        //             return OpsError.UnequalSize; 
-        //        }
-        //    }            
-        //    @compileError("Needs Implementation");
-        //}
-
-        //pub fn multiply(self: SelfPtr, X: anytype, Y: anytype, Z: anytype) !void {
-        //    _ = self;
-        //    const XT = @TypeOf(X.*);
-        //    const YT = @TypeOf(Y.*);
-
-        //    if(XT != YT) {
-        //        @compileError("Cannot multiply tensors of different types.");
-        //    }
-        //    if(XT.ValueType != ValueType) {
-        //        @compileError("Cannot multiply tensors of different value types.");
-        //    }
-        //    if(Policy.validate_args) {
-        //        try expect(X.*.isValid() and Y.*.isValid() and Z.*.isValid());
-        //        try expect(X.*.valueSize() == Y.*.valueSize());
-        //        try expect(X.*.valueSize() == Z.*.valueSize());
-        //    }
-        //    @compileError("Needs Implementation");
-        //}
-
-        // True to the name, this function will permutate the values of your tensor
-        // but not the tensor sizes and strides. Because of this, any tensor that
-        // also reference the underlying memory will be effected as well.
-//
-//        pub fn permutateValues(self: SelfPtr, x: anytype, permutation: [@TypeOf(x.*).Rank]SizesType) !void {
-//            const XT = @TypeOf(x.*);
-//
-//            // If we do not leave the input tensor's sizes and strides alone, then it will
-//            // return the same value for a given index. This is because it's new permutated
-//            // layout will cancel out the effect of permutating the values.
-//
-//            var tmp = x.*;
-//
-//            if(Policy.validate_args) {
-//                if (!tmp.isValid()) { 
-//                    return TensorError.InvalidTensorLayout; 
-//                }
-//                try tmp.permutate(permutation);
-//            }
-//            else {
-//                tmp.permutateUnchecked(permutation);
-//            }
-//            
-//            if(Policy.alloc_scratch) {
-//                // check if we have enough scratch memory
-//                if(self.scratchSize() < tmp.valueSize()){
-//                    try self.resizeScratch(tmp.valueSize());
-//                }
-//
-//                // for the V1 naive implementation, this will be
-//                // the array that caries forward the indicies when
-//                // we inline the recursive loops.
-//                var indices: [XT.Rank]SizesType = undefined;
-//
-//                // counter for iterating through the scratch memory
-//                var counter: XT.SizesType = 0;
-//
-//                @call(.always_inline, recursivePermutateValues, .{
-//                     XT.ValueType, SizesType, XT.Rank, 0, &tmp, self.scratch, &indices, &counter
-//                });
-//
-//                @memcpy(tmp.values, self.scratch[0..tmp.valueSize()]);
-//            }
-//            else {
-//                @compileError("Non-scratch memory version of permutateValues is not implemented.");
-//            } 
-//        }
-    };
-}
-
 /////////////////////////////////////////////////////////////
 // This is the naive version of a general tensor permutation.
 // In the future, I plan on making more optimal versions of
@@ -323,7 +160,7 @@ pub fn TensorOps(comptime value_type: type, comptime policy: OpsPolicy) type {
 //                    count += 1
 //
 
-inline fn recursivePermutate(
+pub inline fn recursivePermutate(
     comptime VT: type, // value type
     comptime IT: type, // int type
     comptime R: usize, // tensor rank
@@ -389,6 +226,10 @@ const contractionParse = @import("ExpressionParsing.zig").contractionParse;
 
 pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !void {
 
+    if(!x.isValid() or !y.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ip = contractionParse(XT.Rank, YT.Rank, expression);
@@ -428,7 +269,7 @@ pub fn contractionUnchecked(comptime expression: [] const u8, x: anytype, y: any
     });
 }
 
-inline fn recursiveContraction(
+pub inline fn recursiveContraction(
     comptime VT: type, // value type
     comptime IT: type, // int type
     comptime XR: usize, // tensor x rank
@@ -571,6 +412,58 @@ fn reduceDispatch(
     }
 }
 
+fn add(x: anytype, y: anytype, z: anytype) !void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+        return OpsError.UnequalSize;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        z.values[i] = x.values[i] + y.values[i1];
+    }
+}
+
+fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        z.values[i] = x.values[i] + y.values[i1];
+    }
+}
+
+fn multiply(x: anytype, y: anytype, z: anytype) !void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+        return OpsError.UnequalSize;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        z.values[i] = x.values[i] * y.values[i1];
+    }
+}
+
+fn multiplyUnchecked(x: anytype, y: anytype, z: anytype) void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        z.values[i] = x.values[i] * y.values[i1];
+    }
+}
+
 inline fn addScalar(x: anytype, y: anytype) @TypeOf(x) {
     return x + y;
 }
@@ -587,159 +480,6 @@ inline fn minScalar(x: anytype, y: anytype) @TypeOf(x) {
     return @min(x, y);
 }
 
-test "vectorized reduce" {
-    const std = @import("std");
-
-    var factory = TensorFactory(i32).init(null);
-
-    factory.tracking(.start);
-    
-    var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
-    
-    @memset(x.values, 1);
-
-    { // reduce sum of 10'000 elements
-        const y = try sum(&x);
-        try std.testing.expectEqual(y, 10000);
-    }
-    { // reduce product of 10'000 elements
-        const y = try product(&x);
-        try std.testing.expectEqual(y, 1);
-    }
-    { // reduce max of 10'000 elements
-        x.setValue(999, .{24, 62});
-        const y = try max(&x);
-        try std.testing.expectEqual(y, 999);
-    }
-    { // reduce max of 10'000 elements
-        x.setValue(-999, .{92, 10});
-        const y = try min(&x);
-        try std.testing.expectEqual(y, -999);
-    }
-    factory.deinit();
-}
-
-//test "Permutate Values" {
-//    const std = @import("std");
-//
-//    var factory = TensorFactory(i32).init(null);
-//
-//    var ops = TensorOps(i32, .{}).init(&factory);
-//
-//    // need a more convincing test
-//    var x = try factory.allocTensor(2, Rowwise, .{ 3, 3 });
-//
-//    var i: i32 = 1;
-//    for(x.values) |*v| { v.* = i; i += 1; }
-//
-//    try ops.permutateValues(&x, .{1, 0});
-//
-//    // basic MxN -> NxM transpose
-//    try std.testing.expectEqual(x.values[0], 1);
-//    try std.testing.expectEqual(x.values[1], 4);
-//    try std.testing.expectEqual(x.values[2], 7);
-//    try std.testing.expectEqual(x.values[3], 2);
-//    try std.testing.expectEqual(x.values[4], 5);
-//    try std.testing.expectEqual(x.values[5], 8);
-//    try std.testing.expectEqual(x.values[6], 3);
-//    try std.testing.expectEqual(x.values[7], 6);
-//    try std.testing.expectEqual(x.values[8], 9);
-//
-//    factory.deinit();
-//}
-
-test "contraction" {
-    const std = @import("std");
-
-    var factory = TensorFactory(i32).init(null);
-
-    factory.tracking(.start);
-
-    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-
-    @memset(x.values, 1);
-
-    var y = try factory.allocTensor(1, Rowwise, .{ 3 });
-
-    try contraction("ijk->i", &x, &y);
-
-    try std.testing.expectEqual(y.values[0], 12);
-    try std.testing.expectEqual(y.values[1], 12);
-    try std.testing.expectEqual(y.values[2], 12);
-
-    var z = try factory.allocTensor(1, Rowwise, .{ 4 });
-
-    try contraction("ijk->j", &x, &z);
-
-    try std.testing.expectEqual(z.values[0], 9);
-    try std.testing.expectEqual(z.values[1], 9);
-    try std.testing.expectEqual(z.values[2], 9);
-    try std.testing.expectEqual(z.values[3], 9);
-
-    factory.deinit();
-}
-
-
-test "contraction 2" {
-    const std = @import("std");
-
-    var factory = TensorFactory(i32).init(null);
-
-    factory.tracking(.start);
-
-    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
-    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
-
-    fill(&x, 1, 1);
-
-    try contraction("ijk->ij", &x, &y);
-
-    try std.testing.expectEqual(y.values[0], 6);
-    try std.testing.expectEqual(y.values[1], 15);
-    try std.testing.expectEqual(y.values[2], 24);
-    try std.testing.expectEqual(y.values[3], 33);
-    try std.testing.expectEqual(y.values[4], 42);
-    try std.testing.expectEqual(y.values[5], 51);
-    try std.testing.expectEqual(y.values[6], 60);
-    try std.testing.expectEqual(y.values[7], 69);
-    try std.testing.expectEqual(y.values[8], 78);
-    try std.testing.expectEqual(y.values[9], 87);
-    try std.testing.expectEqual(y.values[10], 96);
-    try std.testing.expectEqual(y.values[11], 105);
-
-    try contraction("ijk->ji", &x, &z);
-
-    try std.testing.expectEqual(z.values[0], 6);
-    try std.testing.expectEqual(z.values[1], 42);
-    try std.testing.expectEqual(z.values[2], 78);
-    try std.testing.expectEqual(z.values[3], 15);
-    try std.testing.expectEqual(z.values[4], 51);
-    try std.testing.expectEqual(z.values[5], 87);
-    try std.testing.expectEqual(z.values[6], 24);
-    try std.testing.expectEqual(z.values[7], 60);
-    try std.testing.expectEqual(z.values[8], 96);
-    try std.testing.expectEqual(z.values[9], 33);
-    try std.testing.expectEqual(z.values[10], 69);
-    try std.testing.expectEqual(z.values[11], 105);
-
-    try contraction("ijk->jk", &x, &z);
-
-    try std.testing.expectEqual(z.values[0], 39);
-    try std.testing.expectEqual(z.values[1], 42);
-    try std.testing.expectEqual(z.values[2], 45);
-    try std.testing.expectEqual(z.values[3], 48);
-    try std.testing.expectEqual(z.values[4], 51);
-    try std.testing.expectEqual(z.values[5], 54);
-    try std.testing.expectEqual(z.values[6], 57);
-    try std.testing.expectEqual(z.values[7], 60);
-    try std.testing.expectEqual(z.values[8], 63);
-    try std.testing.expectEqual(z.values[9], 66);
-    try std.testing.expectEqual(z.values[10], 69);
-    try std.testing.expectEqual(z.values[11], 72);
-
-    factory.deinit();
-}
 // We're going to use insertion sort to figure out
 // which stride is the smallest so we can create
 // an efficient permutation-order array.

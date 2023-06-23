@@ -35,7 +35,7 @@ factory.deinit();
 ````
 ```zig
 // Assign a new tensor from allocator:
-var Y = try factory.allocTensor(2, Rowwise, .{10, 10});
+var Y = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
 ```
 ```zig
 // Assign memory into existing tensor:
@@ -54,16 +54,30 @@ Tensor operations are are in the form of either _Free Functions_ or _Factory Fun
 The operations use compile time strings as einsum notation:
 
 ```zig
+// Collapse tensor values using contraction:
+
+try zein.contraction("ijk->ji", &x, &y); // free function - assign to existing memory
+
+var y = factory.contraction("ijk->ji", &x); // factory function - allocate new memory
+```
+```zig
+// Elementary binary functions (add, multiply):
+
+try zein.add(&x, &y, &z); // free function - assign to existing memory
+
+var x = factory.add(&x, &y); // factory function - allocate new memory
+```
+```zig
 // Transpose/permutate tensor views (does not modify underlying data).
+
 var y = try x.permutate("ijk->kji");
 ```
 ```zig
-// Collapse tensor values using contraction:
-try zein.contraction("ijk->ji", &x, &y);
-```
-```zig
 // Elementary vectorized reduction functions (sum, product, min, max):
-const s = try zein.sum(&x);
+const a = try zein.sum(&x);
+const b = try zein.product(&x);
+const c = try zein.max(&x);
+const d = try zein.min(&x);
 ```
 
 # Using the Zein library
