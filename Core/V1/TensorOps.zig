@@ -591,6 +591,8 @@ test "vectorized reduce" {
     const std = @import("std");
 
     var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
     
     var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
     
@@ -650,7 +652,8 @@ test "contraction" {
     const std = @import("std");
 
     var factory = TensorFactory(i32).init(null);
-    // need a more convincing test
+
+    factory.tracking(.start);
 
     var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
 
@@ -681,6 +684,9 @@ test "contraction 2" {
     const std = @import("std");
 
     var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+
     var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
     var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
     var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });

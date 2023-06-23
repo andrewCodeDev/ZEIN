@@ -107,16 +107,10 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 
         sizes_and_strides : SizesAndStridesType,
         
-        // This is assigned by the TensorAllocator to
-        // give fast, dependable lookup for tensor
-        // deallocation. Do not assign to it directly.
-        alloc_index: ?usize,
-
         pub fn init(values: ?ValueSlice, sizes: ?[Rank]SizesType) Self {
             return Self {
                 .values = if (values) |vs| (vs) else &[_]ValueType{ },
                 .sizes_and_strides = SizesAndStridesType.init(sizes),
-                .alloc_index = null,
             };
         }
 
