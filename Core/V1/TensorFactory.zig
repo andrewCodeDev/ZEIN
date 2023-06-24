@@ -301,7 +301,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             const XRank = @TypeOf(x.*).Rank;
             const YRank = comptime contractedRank(expression);
 
-            const ip = contractionParse(XRank, YRank, expression);
+            const ip = comptime contractionParse(XRank, YRank, expression);
 
             var y_ss: [YRank]SizesType = undefined;
             {
@@ -318,7 +318,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             @memset(y.values, 0);
             
             @call(.always_inline, Ops.recursiveContraction, .{
-                ValueType, SizesType, XRank, YRank, 0, x, &y, &xc, &yc, &ip.lhs, &ip.rhs
+                ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc
             });
             return y;
         }

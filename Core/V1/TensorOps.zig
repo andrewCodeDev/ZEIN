@@ -222,9 +222,6 @@ pub inline fn recursivePermutate(
 //                    x_indices[I] = n;
 //                    y[y_indices] += x.getValue(x_indices);
 
-///////////////////////////////////////////////////////
-// THIS FUNCTION IS STILL EXPERIMENTAL (testing soon).
-
 pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !void {
 
     if(!x.isValid() or !y.isValid()) {
@@ -233,7 +230,7 @@ pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !vo
 
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
-    const ip = contractionParse(XT.Rank, YT.Rank, expression);
+    const ip = comptime contractionParse(XT.Rank, YT.Rank, expression);
 
     const xs = x.getSizes();
     const ys = y.getSizes();
@@ -250,7 +247,7 @@ pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !vo
     @memset(y.values, 0);
     
     @call(.always_inline, recursiveContraction, .{
-        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, 0, x, y, &xc, &yc, &ip.lhs, &ip.rhs
+        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc
     });
 }
 
@@ -266,7 +263,7 @@ pub fn contractionUnchecked(comptime expression: [] const u8, x: anytype, y: any
     @memset(y.values, 0);
     
     @call(.always_inline, recursiveContraction, .{
-        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, 0, x, y, &xc, &yc, &ip.lhs, &ip.rhs
+        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc
     });
 }
 
@@ -275,13 +272,13 @@ pub inline fn recursiveContraction(
     comptime IT: type, // int type
     comptime XR: usize, // tensor x rank
     comptime YR: usize, // tensor y rank
+    comptime xp: [XR]IT, // x permutation
+    comptime yp: [YR]IT, // y permutation
     comptime I: usize, // starting index
     x: anytype, // source tensor
     y: anytype, // destination memory
     xc: *[XR]IT, // index container
     yc: *[YR]IT, // index container
-    xp: *const [XR]IT, // contraction indices
-    yp: *const [YR]IT // contraction indices
 ) void {
 
     if(XR <= YR) {
@@ -304,7 +301,7 @@ pub inline fn recursiveContraction(
             yc[y_perm_index] = i; 
             
             @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, xp, yp
+                 VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc
             });
         }
     }
@@ -323,7 +320,7 @@ pub inline fn recursiveContraction(
             xc[x_perm_index] = i; 
             
             @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, (I + 1), x, y, xc, yc, xp, yp
+                 VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc
             });
         }
     }
