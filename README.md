@@ -85,15 +85,15 @@ The main ZEIN/Zein.zig file provides an interface for the library implementation
 
 The implementations are in the Core folder. They will be labled as "VX" where X is the verion number.
 
-Most function in the Zein library will have default and "unchecked" versions.
+Most functions in the Zein library will have default and "unchecked" versions.
 
 Default functions ensure operational correctness while unchecked versions do not.
 
 Unchecked versions are provided for api-level optimizations where performance matters.
 
-# Memory Owernship and Viewership
+# Memory Ownership and Viewership
 Currently, tensor permutations only change the indexing of a tensor - they do not
-invalidate underyling memory. If the user chooses to use the TensorFactory,
+invalidate underlying memory. If the user chooses to use the TensorFactory,
 it will track allocations and delete them automatically when calling deinit.
 V1 is only tested on single thread environments - thread safety with allocators
 will be coming in a later version!
