@@ -101,32 +101,22 @@ pub fn findArrowOp(str: [] const u8) ArrowOp {
         if(str[index] == arrow[0]) { tail = index; }
         if(str[index] == arrow[1]) { head = index; }
     }
-
-    ///////////////////////////////////////
-    // check for valid infix arrow operator
-
     if((tail + 1) != head) {
         @compileError("Malformed arrow operator: " ++ str);
     }
     if(tail == 0 or head > (str.len - 2)) {
         @compileError("Arrow must be used as infix operator: " ++ str);
     }
-
     return ArrowOp{ .tail = tail, .head = head };
 }
 
 pub fn findCommaOp(str: [] const u8) usize { 
-    // reference for array operator
     comptime var comma: usize = 0;
     comptime var index: usize = 0;
     inline while(index < str.len) : (index += 1) {
         if(str[index] == ","[0]) { comma = index; break; }
     }
-
-    ///////////////////////////////////////
-    // check for valid infix comma operator
-
-    if(comma == 0 or comma == str.len) {
+    if(comma == 0 or comma >= (str.len - 1)) {
         @compileError("Comma must be used as infix operator: " ++ str);
     }
     return comma;
@@ -205,7 +195,6 @@ pub fn contractionParse(
     const arrow = comptime findArrowOp(str);
     const lhs = str[0..arrow.tail];
     const rhs = str[arrow.head + 1..];
-
 
     if (lhs.len == 0) {
         @compileError("Empty left-side operand: " ++ str);
@@ -352,17 +341,13 @@ pub fn innerProductParse(
 
     const N = countUniqueAlpha(expression);
 
-    const PlanType = InnerProductPlan(N);
-
-    comptime var plan = PlanType{ };
+    comptime var plan = InnerProductPlan(N);
 
     plan.z_size = out.len;
 
     // loop index variables
     comptime var i = 0;
-    comptime var j = 0;
-    
-    // expression character to match upon
+    comptime var j = 0;    
     comptime var chars = uniqueAlpha(expression);
 
     i = 0;
