@@ -11,15 +11,15 @@
 
 const SizesType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
 
-fn between(comptime value: u8, comptime lower: u8, comptime upper: u8) bool {
+pub fn between(comptime value: u8, comptime lower: u8, comptime upper: u8) bool {
     return lower <= value and value <= upper;
 }
 
-fn isAlpha(comptime value: u8) bool {
+pub fn isAlpha(comptime value: u8) bool {
     return between(value, 65, 90) or between(value, 97, 122); // [91, 96] are: [\]^_`
 }
 
-fn allAlpha(comptime str: [] const u8) bool {
+pub fn allAlpha(comptime str: [] const u8) bool {
     comptime var i: usize = 0;
     inline while(i < str.len) : (i += 1) {
         if(!isAlpha(str[i])) { return false; }
@@ -27,8 +27,16 @@ fn allAlpha(comptime str: [] const u8) bool {
     return true;
 }
 
+pub fn contains(comptime char: u8, comptime string: [] const u8) bool {
+    comptime var i: usize = 0;
+    inline while(i < string.len) : (i += 1) {
+        if(char == string[i]) { return true; }
+    }
+    return false;
+}
+
 // check that a permutation is both full and accounted for
-fn isPermutation(comptime source: [] const u8, comptime target: [] const u8) bool {
+pub fn isPermutation(comptime source: [] const u8, comptime target: [] const u8) bool {
 
     if(source.len != target.len) {
         return false;
@@ -54,11 +62,27 @@ fn isPermutation(comptime source: [] const u8, comptime target: [] const u8) boo
     return i_mask == j_mask and i_mask == full;
 }
 
-pub fn IndicesPair(comptime lRank: usize, comptime rRank: usize) type {
-    return struct {
-        lhs : [lRank]SizesType = undefined,
-        rhs : [rRank]SizesType = undefined,
-    };
+pub fn countUniqueAlpha(comptime string: [] const u8) usize {
+    comptime var n: u64 = 0;    
+    comptime var i: usize = 0;
+    inline while(i < string.len) : (i += 1) {
+        if(isAlpha(string[i])) { n |= (1 << (string[i] - 65)); }
+    }
+    return @popCount(n);
+}
+
+pub fn uniqueAlpha(comptime string: [] const u8) [countUniqueAlpha(string)]u8 {
+    const N = comptime countUniqueAlpha(string);
+    comptime var i: usize = 0;
+    comptime var j: usize = 0;
+    comptime var chars: [N]u8 = .{0} ** N;
+    inline while(i < string.len) : (i += 1) {
+        if(comptime isAlpha(string[i]) and !contains(string[i], &chars)) { 
+            chars[j] = string[i];
+            j += 1;
+        }
+    }
+    return chars;
 }
 
 const ArrowOp = struct {
@@ -91,18 +115,22 @@ pub fn findArrowOp(str: [] const u8) ArrowOp {
     return ArrowOp{ .tail = tail, .head = head };
 }
 
-pub fn contractedRank(comptime str: [] const u8) usize {
-    return (str.len - (comptime findArrowOp(str)).head) - 1;
-}
+pub fn findCommaOp(str: [] const u8) usize { 
+    // reference for array operator
+    comptime var comma: usize = 0;
+    comptime var index: usize = 0;
+    inline while(index < str.len) : (index += 1) {
+        if(str[index] == ","[0]) { comma = index; break; }
+    }
 
-// Contraction parsing is expects strings of the form:
-//
-//     example: ijk->jk
-//
-// The expressions must be larger on the left-operand than
-// the right operand (denoting contracted indices).
-//
-// The left and right operands must be alpha-characters.
+    ///////////////////////////////////////
+    // check for valid infix comma operator
+
+    if(comma == 0 or comma == str.len) {
+        @compileError("Comma must be used as infix operator: " ++ str);
+    }
+    return comma;
+}
 
 pub fn permutateParse(
     comptime Rank: usize,
@@ -147,37 +175,37 @@ pub fn permutateParse(
     return indices;
 }
 
+// Contraction parsing is expects strings of the form:
+//
+//     example: ijk->jk
+//
+// The expressions must be larger on the left-operand than
+// the right operand (denoting contracted indices).
+//
+// The left and right operands must be alpha-characters.
+
+pub fn contractedRank(comptime str: [] const u8) usize {
+    return (str.len - (comptime findArrowOp(str)).head) - 1;
+}
+
+pub fn ContractionPair(comptime lRank: usize, comptime rRank: usize) type {
+    return struct {
+        lhs : [lRank]SizesType = undefined,
+        rhs : [rRank]SizesType = undefined,
+    };
+}
+
 pub fn contractionParse(
     comptime lRank: usize,
     comptime rRank: usize,
     comptime str: [] const u8
-) IndicesPair(lRank, rRank) {
+) ContractionPair(lRank, rRank) {
     comptime var index: usize = 0;
 
-    // reference for array operator
-    const arrow: [] const u8 = "->";
+    const arrow = comptime findArrowOp(str);
+    const lhs = str[0..arrow.tail];
+    const rhs = str[arrow.head + 1..];
 
-    comptime var a: usize = 0;
-    comptime var b: usize = 0;
-
-    // mark one before the arrow and one after the arrow
-    inline while(index < str.len) : (index += 1) {
-        if(str[index] == arrow[0]) { a = index; }
-        if(str[index] == arrow[1]) { b = index; }
-    }
-
-    ///////////////////////////////////////
-    // check for valid infix arrow operator
-
-    if((a + 1) != b) {
-        @compileError("Malformed arrow operator: " ++ str);
-    }
-    if(a == 0 or b > (str.len - 2)) {
-        @compileError("Arrow must be used as infix operator: " ++ str);
-    }
-
-    const lhs = str[0..a];
-    const rhs = str[b+1..];
 
     if (lhs.len == 0) {
         @compileError("Empty left-side operand: " ++ str);
@@ -252,7 +280,113 @@ pub fn contractionParse(
     index = rhs.len;
     inline while(index < lhs.len) : ({ index += 1; rem_i += 1; }){
         x_indices[index] = remainder[rem_i];
+    }   
+    return ContractionPair(lRank, rRank){ .lhs = x_indices, .rhs = y_indices };
+}
+
+///////////////////////
+//// Inner-Product ////
+
+pub fn InnerProductPlan(comptime N: usize) type {
+
+    const pass_flag: usize = 9999;
+    
+    return struct {
+        pass: usize = pass_flag,
+        x_perm: [N]usize = .{ pass_flag } ** N,
+        y_perm: [N]usize = .{ pass_flag } ** N,
+        z_perm: [N]usize = .{ pass_flag } ** N,
+        s_ctrl: [N]usize = .{ pass_flag } ** N,
+        z_size: usize = 0,
+        total: usize = N,
+    };
+}
+
+pub fn innerProductParse(
+    comptime XRank: usize,
+    comptime YRank: usize,
+    comptime ZRank: usize,
+    comptime expression: [] const u8) InnerProductPlan(countUniqueAlpha(expression)) {
+
+    const arrow = comptime findArrowOp(expression);
+    const comma = comptime findCommaOp(expression);
+
+    if(comma >= (arrow.tail - 1)) {
+        @compileError("Comma operator must come before left operand: " ++ expression);
     }
-        
-    return IndicesPair(lRank, rRank){ .lhs = x_indices, .rhs = y_indices };
+
+    const lhs = expression[0..comma];
+    const rhs = expression[comma+1..arrow.tail];
+    const out = expression[arrow.head+1..];
+
+    if(lhs.len == 0) {
+        @compileError("Empty left-side operand: " ++ expression);
+    }
+    if(rhs.len == 0) {
+        @compileError("Empty right-side operand: " ++ expression);
+    }
+    if(out.len == 0) {
+        @compileError("Empty expression result: " ++ expression);
+    }
+    if(lhs.len != XRank) {
+        @compileError("Provided indices do not match left-side operand rank: " ++ lhs);
+    }
+    if(rhs.len != YRank) {
+        @compileError("Provided indices do not match right-side operand rank: " ++ rhs);
+    }
+    if(out.len != ZRank) {
+        @compileError("Provided indices do not match result rank: " ++ out);
+    }
+    if(!comptime allAlpha(lhs)) {
+        @compileError("Non-alphabetical character found in: " ++ lhs);
+    }
+    if(!comptime allAlpha(rhs)) {
+        @compileError("Non-alphabetical character found in: " ++ rhs);
+    }
+    if(!comptime allAlpha(out)) {
+        @compileError("Non-alphabetical character found in: " ++ out);
+    }
+
+    ////////////////////////////////////////
+    // build inner product control indices
+
+    const N = countUniqueAlpha(expression);
+
+    const PlanType = InnerProductPlan(N);
+
+    comptime var plan = PlanType{ };
+
+    plan.z_size = out.len;
+
+    // loop index variables
+    comptime var i = 0;
+    comptime var j = 0;
+    
+    // expression character to match upon
+    comptime var chars = uniqueAlpha(expression);
+
+    i = 0;
+    inline while(i < N) : (i += 1) {
+        j = 0;
+        inline while(j < lhs.len) : (j += 1) {
+            if(lhs[j] == chars[i]) { 
+                plan.x_perm[i] = j;
+                plan.s_ctrl[i] = 0;
+            }
+        }
+        j = 0;
+        inline while(j < rhs.len) : (j += 1) {
+            if(rhs[j] == chars[i]) { 
+                plan.y_perm[i] = j;
+                plan.s_ctrl[i] = 1;
+            }
+        }
+        j = 0;
+        inline while(j < out.len) : (j += 1) {
+            if(out[j] == chars[i]) { 
+                plan.z_perm[i] = j;
+            }
+        }
+    }
+    return plan;
 }

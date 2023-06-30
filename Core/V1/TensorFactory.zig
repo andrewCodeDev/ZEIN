@@ -452,6 +452,8 @@ test "contraction" {
 test "contraction 2" {
     var factory = TensorFactory(i32).init(null);
 
+    defer factory.deinit();
+
     factory.tracking(.start);
 
     var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
@@ -504,6 +506,34 @@ test "contraction 2" {
     try std.testing.expectEqual(z.values[9], 66);
     try std.testing.expectEqual(z.values[10], 69);
     try std.testing.expectEqual(z.values[11], 72);
+}
 
-    factory.deinit();
+test "inner product" {
+
+    var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+
+    defer factory.deinit();
+
+    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var z = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+
+    Ops.fill(&x, 1, 0);
+    Ops.fill(&y, 1, 1);
+
+    try Ops.innerProduct("ij,jk->ik", &x, &y, &z);
+
+    try std.testing.expectEqual(z.values[0], 4);
+    try std.testing.expectEqual(z.values[1], 6);
+    try std.testing.expectEqual(z.values[2], 4);
+    try std.testing.expectEqual(z.values[3], 6);
+
+    try Ops.innerProduct("ij,jk->ki", &x, &y, &z);
+
+    try std.testing.expectEqual(z.values[0], 4);
+    try std.testing.expectEqual(z.values[1], 4);
+    try std.testing.expectEqual(z.values[2], 6);
+    try std.testing.expectEqual(z.values[3], 6);
 }
