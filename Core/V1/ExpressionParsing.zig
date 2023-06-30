@@ -286,7 +286,6 @@ pub fn InnerProductPlan(comptime N: usize) type {
         y_perm: [N]usize = .{ pass_flag } ** N,
         z_perm: [N]usize = .{ pass_flag } ** N,
         s_ctrl: [N]usize = .{ pass_flag } ** N,
-        z_size: usize = 0,
         total: usize = N,
     };
 }
@@ -341,9 +340,7 @@ pub fn innerProductParse(
 
     const N = countUniqueAlpha(expression);
 
-    comptime var plan = InnerProductPlan(N);
-
-    plan.z_size = out.len;
+    comptime var plan = InnerProductPlan(N){ };
 
     // loop index variables
     comptime var i = 0;

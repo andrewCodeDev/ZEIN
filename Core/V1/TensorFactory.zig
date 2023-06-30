@@ -30,6 +30,7 @@ const Colwise = @import("SizesAndStrides.zig").Colwise;
 const Ops = @import("TensorOps.zig");
 const OpsError = @import("TensorOps.zig").OpsError;
 const contractionParse = @import("ExpressionParsing.zig").contractionParse;
+const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
 const contractedRank = @import("ExpressionParsing.zig").contractedRank;
 const sliceProduct = @import("Utility.zig").sliceProduct;
 
@@ -322,6 +323,47 @@ pub fn TensorFactory(comptime value_type: type) type {
             });
             return y;
         }
+
+        pub fn innerProduct(
+            self: SelfPtr, 
+            comptime expression: [] const u8, 
+            x: anytype,
+            y: anytype
+            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+
+            if(!x.isValid() or !y.isValid()) {
+                return TensorError.InvalidTensorLayout;
+            }
+            const XRank = @TypeOf(x.*).Rank;
+            const YRank = @TypeOf(y.*).Rank;
+            const ZRank = comptime contractedRank(expression);
+            const plan = comptime innerProductParse(XRank, YRank, ZRank, expression);
+
+            var z_sizes: [ZRank]SizesType = undefined;
+            {
+                var i: usize = 0;
+                while(i < plan.total) : (i += 1) {
+                    if(plan.z_perm[i] == plan.pass) {
+                        continue;
+                    } else if(plan.s_ctrl[i] == 0){
+                        z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
+                    } else {
+                        z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
+                    }
+                }
+            }
+            var z = try self.allocTensor(ZRank, @TypeOf(x.*).Order, z_sizes);
+            var x_i: [XRank]SizesType = undefined;
+            var y_i: [YRank]SizesType = undefined;
+            var z_i: [ZRank]SizesType = undefined;
+            
+            @memset(z.values, 0);
+            
+            @call(.always_inline, Ops.recursiveInnerProduct, .{
+                ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i
+            });
+            return z;
+        }
     };
 }
 
@@ -508,7 +550,7 @@ test "contraction 2" {
     try std.testing.expectEqual(z.values[11], 72);
 }
 
-test "inner product" {
+test "inner product 1" {
 
     var factory = TensorFactory(i32).init(null);
 
@@ -536,4 +578,33 @@ test "inner product" {
     try std.testing.expectEqual(z.values[1], 4);
     try std.testing.expectEqual(z.values[2], 6);
     try std.testing.expectEqual(z.values[3], 6);
+}
+
+test "inner product 2" {
+
+    var factory = TensorFactory(i32).init(null);
+
+    factory.tracking(.start);
+
+    defer factory.deinit();
+
+    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+
+    Ops.fill(&x, 1, 0);
+    Ops.fill(&y, 1, 1);
+
+    var z = try factory.innerProduct("ij,jk->ik", &x, &y);
+
+    try std.testing.expectEqual(z.values[0], 4);
+    try std.testing.expectEqual(z.values[1], 6);
+    try std.testing.expectEqual(z.values[2], 4);
+    try std.testing.expectEqual(z.values[3], 6);
+
+    var w = try factory.innerProduct("ij,jk->ki", &x, &y);
+
+    try std.testing.expectEqual(w.values[0], 4);
+    try std.testing.expectEqual(w.values[1], 4);
+    try std.testing.expectEqual(w.values[2], 6);
+    try std.testing.expectEqual(w.values[3], 6);
 }

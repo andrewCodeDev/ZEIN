@@ -362,6 +362,8 @@ pub fn innerProduct(
         return TensorError.InvalidTensorLayout;
     }
 
+    // TODO: Add dimension checks for compatible indexing
+
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
@@ -381,7 +383,7 @@ pub fn innerProduct(
     });
 }
 
-inline fn sizeSelector(
+pub inline fn sizeSelector(
     comptime x_index: usize,
     comptime y_index: usize,
     comptime select: usize,
