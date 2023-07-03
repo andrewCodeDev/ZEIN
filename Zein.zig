@@ -36,6 +36,4 @@ pub const scaleUnchecked = TensorOpsVersion.scaleUnchecked;
 pub const bias = TensorOpsVersion.bias;
 pub const biasUnchecked = TensorOpsVersion.biasUnchecked;
 pub const fill = TensorOpsVersion.fill;
-pub const abs = TensorOpsVersion.abs;
-pub const absUnchecked = TensorOpsVersion.absUnchecked;
 pub const absMax = TensorOpsVersion.absMax;
