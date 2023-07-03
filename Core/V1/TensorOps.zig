@@ -39,8 +39,19 @@ pub const OpsError = error {
     UnequalSize,
     InvalidDimensions,
     InvalidSizes,
-    SizeZeroTensor
+    SizeZeroTensor,
+    IntegerOverflow
 };
+
+inline fn uint(comptime size: usize) type {
+    return switch(size) {
+        64 => return u64,
+        32 => return u32,
+        16 => return u16,
+         8 => return u8,
+        else => @compileError("Invalid size passed to uint function.")
+    };
+}
 
 inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
 
@@ -122,6 +133,27 @@ pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
     }
 }
 
+// TODO: Address the issue with checked vs unchecked absScalar at call sight
+pub fn absMax(x: anytype) !@TypeOf(x.*).ValueType {
+    if(x.valueSize() > 0) {
+       return mapReduceDispatch(
+            ReduceOp.Max, absScalarUnchecked, maxScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+        );
+    } else {
+        return OpsError.SizeZeroTensor;
+    }
+}
+
+// TODO: Address the issue with checked vs unchecked absScalar at call sight
+pub fn absMin(x: anytype) !@TypeOf(x.*).ValueType {
+    if(x.valueSize() > 0) {
+       return mapReduceDispatch(
+            ReduceOp.Min, absScalarUnchecked, minScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+        );
+    } else {
+        return OpsError.SizeZeroTensor;
+    }
+}
 // To complete the set, for those who like to live dangerously... the unchecked versions.
 
 pub fn sumUnchecked(x: anytype) !@TypeOf(x.*).ValueType {
@@ -472,7 +504,7 @@ fn vectorizedReduce(
     // reduce in size N chunks...
     while((i + N) < x.valueSize()) : (i += N) {
         const slice = x.values[i..N + i];
-        const vec: @Vector(N, T) =  slice[0..N].*; // needs compile time length
+        const vec: @Vector(N, T) = slice[0..N].*; // needs compile time length
         rdx = @call(.always_inline, ScalarFunc, .{ rdx, @reduce(ReduceType, vec) });
     }
     // reduce remainder...
@@ -489,7 +521,7 @@ fn reduceDispatch(
     init: @TypeOf(x.*).ValueType
 ) @TypeOf(x.*).ValueType {
 
-    const size = x.*.valueSize();
+    const size = x.valueSize();
 
     if(size < 128) {
         return loopReduce(ScalarFunc, x, init);
@@ -502,6 +534,72 @@ fn reduceDispatch(
     }
     else {
         return vectorizedReduce(512, ReduceType, ScalarFunc, x, init);
+    }
+}
+
+fn loopMapReduce(
+    comptime UnaryFunc: anytype, 
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    init: @TypeOf(x.*).ValueType
+    ) @TypeOf(x.*).ValueType {
+    var i: usize = 0;
+    var rdx = init;
+    while(i < x.valueSize()) : (i += 1) {
+        const u = @call(.always_inline, UnaryFunc, .{ x.values[i] });
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, u }); 
+    }
+    return rdx;
+}
+
+fn vectorizedMapReduce(
+    comptime N: usize, 
+    comptime ReduceType: anytype, 
+    comptime UnaryFunc: anytype, 
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    init: @TypeOf(x.*).ValueType
+    ) @TypeOf(x.*).ValueType {
+
+    const T = @TypeOf(x.*).ValueType;
+    var i: usize = 0;
+    var rdx = init;
+    
+    // reduce in size N chunks...
+    while((i + N) < x.valueSize()) : (i += N) {
+        const slice = x.values[i..N + i];
+        var vec: @Vector(N, T) =  slice[0..N].*; // needs compile time length
+        vec = @call(.always_inline, UnaryFunc, .{ vec });
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, @reduce(ReduceType, vec) });
+    }
+    // reduce remainder...
+    while(i < x.valueSize()) : (i += 1) {
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
+    }
+    return rdx;
+}
+
+fn mapReduceDispatch(    
+    comptime ReduceType: anytype, 
+    comptime UnaryFunc: anytype,
+    comptime BinaryFunc: anytype,
+    x: anytype,
+    init: @TypeOf(x.*).ValueType
+) @TypeOf(x.*).ValueType {
+
+    const size = x.valueSize();
+
+    if(size < 128) {
+        return loopMapReduce(UnaryFunc, BinaryFunc, x, init);
+    }
+    else if(size < 256) {
+        return vectorizedMapReduce(128, ReduceType, UnaryFunc, BinaryFunc, x, init);
+    }
+    else if(size < 512) {
+        return vectorizedMapReduce(256, ReduceType, UnaryFunc, BinaryFunc, x, init);
+    }
+    else {
+        return vectorizedMapReduce(512, ReduceType, UnaryFunc, BinaryFunc, x, init);
     }
 }
 
@@ -553,7 +651,41 @@ pub fn multiplyUnchecked(x: anytype, y: anytype, z: anytype) void {
     }
     var i: usize = 0;
     while(i < x.values.len) : (i += 1) {
-        z.values[i] = x.values[i] * y.values[i1];
+        x.values[i] = @call(.always_inline, mulScalar, .{ y.values[i], z.values[i] });
+    }
+}
+
+pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
+    if(!x.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, mulScalar, .{ x.values[i], s });
+    }
+}
+
+pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, mulScalar, .{ x.values[i], s });
+    }
+}
+
+pub fn bias(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
+    if(!x.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, addScalar, .{ x.values[i], s });
+    }
+}
+
+pub fn biasUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, addScalar, .{ x.values[i], s });
     }
 }
 
@@ -573,6 +705,46 @@ inline fn minScalar(x: anytype, y: anytype) @TypeOf(x) {
     return @min(x, y);
 }
 
+pub inline fn absScalarUnchecked(x: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    return switch (comptime @typeInfo(T)) {
+        .Float => {
+            return @fabs(x);
+        },
+        .Int => |info| {
+            if(comptime info.signedness == true) {
+                const mask = x >> (comptime @bitSizeOf(@TypeOf(x)) - 1);
+                return (x + mask) ^ mask;
+            } else {
+                return x;  
+            }
+        },
+        .Vector => |info| {
+            return switch(comptime @typeInfo(info.child)) {
+                .Float => {
+                    return @fabs(x);
+                },
+                else => {
+                    @compileError("Absolute value for integer vectors unimplemented.");
+                }
+            };
+        },
+        else => @compileError("Invalid type passed to absScalar function: " ++ @typeName(T))
+    };
+}
+
+pub inline fn absScalar(x: anytype) !@TypeOf(x) {    
+    const T = @TypeOf(x);
+    return switch (comptime @typeInfo(T)) {
+        .Int => |info| {
+            if(info.signedness) {
+                if(x == math.minInt(T)) return OpsError.IntegerOverflow;
+            }
+            return @call(.always_inline, absScalarUnchecked, .{ x });
+        },
+        else => @call(.always_inline, absScalarUnchecked, .{ x })
+    };
+}
 // We're going to use insertion sort to figure out
 // which stride is the smallest so we can create
 // an efficient permutation-order array.
