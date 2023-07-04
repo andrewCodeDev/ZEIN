@@ -1,12 +1,6 @@
 
 // DESIGN PHILOSOPHY June 6th, 2023 //
 
-// The TensorOps class is a general interface for common tensor operations.
-// It has an "OpsPolicy" which will allow for users to quickly switch between
-// modes. For instance, the policy (with a single field) can turn on validation
-// checks and be turned off after for higher performance. Since these are comptime
-// parameters, the checks will get compiled out during runtime.
-
 // The goal for V1 is simple. Provide reliable (albeit naive) functionality
 // that focuses on correctness first. Once that is established, V2 can use
 // V1 as a reference for future versions, therefore creating a baseline
@@ -29,11 +23,6 @@ pub const contractionParse = @import("ExpressionParsing.zig").contractionParse;
 pub const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
 pub const computeTensorIndex = @import("Tensor.zig").computeTensorIndex;
 
-
-// The OpsPolicy controls the behavior of the math
-// class. This includes behavior such as whether or
-// not the class can allocate new tensors if output
-// tensors are are not provided
 
 pub const OpsError = error {
     UnequalSize,
@@ -106,67 +95,81 @@ inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
 
 pub fn sum(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Add, addScalar, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Add, addGeneric, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
     } else {
          return OpsError.SizeZeroTensor;
     }
 }
 pub fn product(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Mul, mulScalar, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Mul, mulGeneric, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn min(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Min, minScalar, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Min, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-       return reduceDispatch(ReduceOp.Max, maxScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
+       return reduceDispatch(ReduceOp.Max, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 
-// TODO: Address the issue with checked vs unchecked absScalar at call sight
-pub fn absMax(x: anytype) !@TypeOf(x.*).ValueType {
+// TODO: Address the issue with checked vs unchecked absGeneric at call sight
+pub fn absmax(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
        return mapReduceDispatch(
-            ReduceOp.Max, absScalarUnchecked, maxScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
-        );
+            ReduceOp.Max, absGenericUnchecked, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+       );
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 
-// TODO: Address the issue with checked vs unchecked absScalar at call sight
-pub fn absMin(x: anytype) !@TypeOf(x.*).ValueType {
+// TODO: Address the issue with checked vs unchecked absGeneric at call sight
+pub fn absmin(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
        return mapReduceDispatch(
-            ReduceOp.Min, absScalarUnchecked, minScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
-        );
+            ReduceOp.Min, absGenericUnchecked, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType)
+       );
     } else {
         return OpsError.SizeZeroTensor;
     }
+}
+
+// TODO: Address the issue with checked vs unchecked absGeneric at call sight
+pub fn absmaxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return mapReduceDispatch(
+         ReduceOp.Max, absGenericUnchecked, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+    );
+}
+
+// TODO: Address the issue with checked vs unchecked absGeneric at call sight
+pub fn absminUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return mapReduceDispatch(
+         ReduceOp.Min, absGenericUnchecked, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType)
+    );
 }
 // To complete the set, for those who like to live dangerously... the unchecked versions.
 
-pub fn sumUnchecked(x: anytype) !@TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Add, addScalar, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
+pub fn sumUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return reduceDispatch(ReduceOp.Add, addGeneric, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
 }
-pub fn productUnchecked(x: anytype) !@TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Mul, mulScalar, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
+pub fn productUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return reduceDispatch(ReduceOp.Mul, mulGeneric, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
 }
-pub fn minUnchecked(x: anytype) !@TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Min, minScalar, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
+pub fn minUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return reduceDispatch(ReduceOp.Min, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
 }
-pub fn maxUnchecked(x: anytype) !@TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Max, maxScalar, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
+pub fn maxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
+    return reduceDispatch(ReduceOp.Max, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
 }
 
 pub fn fill(
@@ -178,6 +181,147 @@ pub fn fill(
     for(x.values) |*value| {
         value.* = incr;
         incr += step;
+    }
+}
+
+//////////////////////////////////////////////////////////////
+///////// BINARY ARITHMETIC FUNCTIONS ////////////////////////
+
+pub fn add(x: anytype, y: anytype, z: anytype) !void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+        return OpsError.UnequalSize;
+    }
+    arithmeticDispatch(addGeneric, x, y, z);
+}
+
+pub fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    arithmeticDispatch(addGeneric, x, y, z);
+}
+
+pub fn sub(x: anytype, y: anytype, z: anytype) !void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+        return OpsError.UnequalSize;
+    }
+    arithmeticDispatch(subGeneric, x, y, z);
+}
+
+pub fn subUnchecked(x: anytype, y: anytype, z: anytype) void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    arithmeticDispatch(subGeneric, x, y, z);
+}
+
+pub fn mul(x: anytype, y: anytype, z: anytype) !void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+        return OpsError.UnequalSize;
+    }
+    arithmeticDispatch(mulGeneric, x, y, z);
+}
+
+pub fn mulUnchecked(x: anytype, y: anytype, z: anytype) void {
+    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+        @compileError("Mismatched tensor types for addition.");
+    }
+    arithmeticDispatch(mulGeneric, x, y, z);
+}
+
+pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
+    if(!x.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, mulGeneric, .{ x.values[i], s });
+    }
+}
+
+pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, mulGeneric, .{ x.values[i], s });
+    }
+}
+
+pub fn bias(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
+    if(!x.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, addGeneric, .{ x.values[i], s });
+    }
+}
+
+pub fn biasUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, addGeneric, .{ x.values[i], s });
+    }
+}
+inline fn quantizeGeneric(comptime int: type, x: anytype) int {
+    return @intFromFloat(@round(x * comptime @as(@TypeOf(x), math.maxInt(int))));
+}
+
+pub fn quantize(x: anytype, y: anytype) @TypeOf(x.*).ValueType {
+    const m = absmaxUnchecked(x);
+
+    if(m > 1.0) {
+        const s = 1.0 / m;
+        var i: usize = 0;
+        while(i < x.values.len) : (i += 1) {
+            y.values[i] = quantizeGeneric(@TypeOf(y.*).ValueType, x.values[i] * s);
+        }
+    }
+    else {
+        var i: usize = 0;
+        while(i < 100) : (i += 1) {
+            y.values[i] = quantizeGeneric(@TypeOf(y.*).ValueType, x.values[i]);
+        }
+    }
+    return m;
+}
+
+
+inline fn unquantizeGeneric(comptime float: type, x: anytype) float {
+    return @as(float, @floatFromInt(x)) / comptime @as(float, @floatFromInt(math.maxInt(@TypeOf(x))));
+}
+
+pub fn unquantize(x: anytype, y: anytype, s: @TypeOf(y.*).ValueType) void {
+    const FT = @TypeOf(y.*).ValueType;
+    
+    if(s > 1.0) {
+        var i: usize = 0;
+        while(i < x.values.len) : (i += 1) {
+            y.values[i] = s * unquantizeGeneric(FT, x.values[i]);
+        }
+    }
+    else {
+        var i: usize = 0;
+        while(i < 100) : (i += 1) {
+            y.values[i] = unquantizeGeneric(FT, x.values[i]);
+        }
     }
 }
 
@@ -477,14 +621,14 @@ pub inline fn recursiveInnerProduct(
 }
 
 fn loopReduce(
-    comptime ScalarFunc: anytype, 
+    comptime GenericFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
     ) @TypeOf(x.*).ValueType {
     var i: usize = 0;
     var rdx = init;
     while(i < x.valueSize()) : (i += 1) {
-        rdx = @call(.always_inline, ScalarFunc, .{ rdx, x.values[i] });
+        rdx = @call(.always_inline, GenericFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
@@ -492,7 +636,7 @@ fn loopReduce(
 fn vectorizedReduce(
     comptime N: usize, 
     comptime ReduceType: anytype, 
-    comptime ScalarFunc: anytype, 
+    comptime GenericFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
     ) @TypeOf(x.*).ValueType {
@@ -505,18 +649,18 @@ fn vectorizedReduce(
     while((i + N) < x.valueSize()) : (i += N) {
         const slice = x.values[i..N + i];
         const vec: @Vector(N, T) = slice[0..N].*; // needs compile time length
-        rdx = @call(.always_inline, ScalarFunc, .{ rdx, @reduce(ReduceType, vec) });
+        rdx = @call(.always_inline, GenericFunc, .{ rdx, @reduce(ReduceType, vec) });
     }
     // reduce remainder...
     while(i < x.valueSize()) : (i += 1) {
-        rdx = @call(.always_inline, ScalarFunc, .{ rdx, x.values[i] });
+        rdx = @call(.always_inline, GenericFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
 
 fn reduceDispatch(    
     comptime ReduceType: anytype, 
-    comptime ScalarFunc: anytype, 
+    comptime GenericFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
 ) @TypeOf(x.*).ValueType {
@@ -524,16 +668,73 @@ fn reduceDispatch(
     const size = x.valueSize();
 
     if(size < 128) {
-        return loopReduce(ScalarFunc, x, init);
+        return loopReduce(GenericFunc, x, init);
     }
     else if(size < 256) {
-        return vectorizedReduce(128, ReduceType, ScalarFunc, x, init);
+        return vectorizedReduce(128, ReduceType, GenericFunc, x, init);
     }
     else if(size < 512) {
-        return vectorizedReduce(256, ReduceType, ScalarFunc, x, init);
+        return vectorizedReduce(256, ReduceType, GenericFunc, x, init);
     }
     else {
-        return vectorizedReduce(512, ReduceType, ScalarFunc, x, init);
+        return vectorizedReduce(512, ReduceType, GenericFunc, x, init);
+    }
+}
+
+fn loopArithmetic(
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    y: anytype,
+    z: anytype,
+    ) void {
+    var i: usize = 0;
+    while(i < x.valueSize()) : (i += 1) {
+        z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
+    }
+}
+
+fn vectorizedArithmetic(
+    comptime N: usize, 
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    y: anytype,
+    z: anytype,
+    ) void {
+    const T = @TypeOf(x.*).ValueType;
+    var i: usize = 0;
+    var j: usize = N;
+    var buffer: [N]T = undefined;
+    while(j <= x.values.len) : ({i += 512; j += 512; }) {
+        const v: @Vector(N, T) = x.values[0..N].*;
+        const u: @Vector(N, T) = y.values[0..N].*;
+        buffer = @call(.always_inline, BinaryFunc, .{v, u});
+        @memcpy(z.values[i..j], &buffer);
+    }
+    while(i < x.values.len) : (i += 1) {
+        z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
+    }
+}
+
+fn arithmeticDispatch(    
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    y: anytype,
+    z: anytype,
+) void {
+
+    const size = x.valueSize();
+
+    if(size < 128) {
+        return loopArithmetic(BinaryFunc, x, y, z);
+    }
+    else if(size < 256) {
+        return vectorizedArithmetic(128, BinaryFunc, x, y, z);
+    }
+    else if(size < 512) {
+        return vectorizedArithmetic(256, BinaryFunc, x, y, z);
+    }
+    else {
+        return vectorizedArithmetic(512, BinaryFunc, x, y, z);
     }
 }
 
@@ -603,109 +804,26 @@ fn mapReduceDispatch(
     }
 }
 
-pub fn add(x: anytype, y: anytype, z: anytype) !void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
-        @compileError("Mismatched tensor types for addition.");
-    }
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
-        return TensorError.InvalidTensorLayout;
-    }
-    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
-        return OpsError.UnequalSize;
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        z.values[i] = x.values[i] + y.values[i1];
-    }
-}
-
-pub fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
-        @compileError("Mismatched tensor types for addition.");
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        z.values[i] = x.values[i] + y.values[i1];
-    }
-}
-
-pub fn multiply(x: anytype, y: anytype, z: anytype) !void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
-        @compileError("Mismatched tensor types for addition.");
-    }
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
-        return TensorError.InvalidTensorLayout;
-    }
-    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
-        return OpsError.UnequalSize;
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        z.values[i] = x.values[i] * y.values[i1];
-    }
-}
-
-pub fn multiplyUnchecked(x: anytype, y: anytype, z: anytype) void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
-        @compileError("Mismatched tensor types for addition.");
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        x.values[i] = @call(.always_inline, mulScalar, .{ y.values[i], z.values[i] });
-    }
-}
-
-pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid()) {
-        return TensorError.InvalidTensorLayout;
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, mulScalar, .{ x.values[i], s });
-    }
-}
-
-pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, mulScalar, .{ x.values[i], s });
-    }
-}
-
-pub fn bias(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid()) {
-        return TensorError.InvalidTensorLayout;
-    }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, addScalar, .{ x.values[i], s });
-    }
-}
-
-pub fn biasUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, addScalar, .{ x.values[i], s });
-    }
-}
-
-inline fn addScalar(x: anytype, y: anytype) @TypeOf(x) {
+inline fn addGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return x + y;
 }
-inline fn mulScalar(x: anytype, y: anytype) @TypeOf(x) {
+inline fn mulGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return x * y;
 }
-inline fn divScalar(x: anytype, y: anytype) @TypeOf(x) {
+inline fn subGeneric(x: anytype, y: anytype) @TypeOf(x) {
+    return x - y;
+}
+inline fn divGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return x / y;
 }
-inline fn maxScalar(x: anytype, y: anytype) @TypeOf(x) {
+inline fn maxGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return @max(x, y);
 }
-inline fn minScalar(x: anytype, y: anytype) @TypeOf(x) {
+inline fn minGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return @min(x, y);
 }
 
-pub inline fn absScalarUnchecked(x: anytype) @TypeOf(x) {
+pub inline fn absGenericUnchecked(x: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     return switch (comptime @typeInfo(T)) {
         .Float => {
@@ -729,20 +847,20 @@ pub inline fn absScalarUnchecked(x: anytype) @TypeOf(x) {
                 }
             };
         },
-        else => @compileError("Invalid type passed to absScalar function: " ++ @typeName(T))
+        else => @compileError("Invalid type passed to absGeneric function: " ++ @typeName(T))
     };
 }
 
-pub inline fn absScalar(x: anytype) !@TypeOf(x) {    
+pub inline fn absGeneric(x: anytype) !@TypeOf(x) {    
     const T = @TypeOf(x);
     return switch (comptime @typeInfo(T)) {
         .Int => |info| {
             if(info.signedness) {
                 if(x == math.minInt(T)) return OpsError.IntegerOverflow;
             }
-            return @call(.always_inline, absScalarUnchecked, .{ x });
+            return @call(.always_inline, absGenericUnchecked, .{ x });
         },
-        else => @call(.always_inline, absScalarUnchecked, .{ x })
+        else => @call(.always_inline, absGenericUnchecked, .{ x })
     };
 }
 // We're going to use insertion sort to figure out

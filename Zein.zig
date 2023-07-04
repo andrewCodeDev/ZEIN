@@ -21,19 +21,44 @@ pub const AllocatorError = TensorFactoryVersion.AllocatorError;
 
 // import core TensorOps version
 const TensorOpsVersion = @import("Core/V1/TensorOps.zig");
+
 pub const sum = TensorOpsVersion.sum;
 pub const sumUnchecked = TensorOpsVersion.sumUnchecked;
+
 pub const product = TensorOpsVersion.product;
 pub const productUnchecked = TensorOpsVersion.productUnchecked;
+
 pub const min = TensorOpsVersion.min;
 pub const minUnchecked = TensorOpsVersion.minUnchecked;
+
 pub const max = TensorOpsVersion.max;
 pub const maxUnchecked = TensorOpsVersion.maxUnchecked;
+
 pub const contraction = TensorOpsVersion.contraction;
 pub const contractionUnchecked = TensorOpsVersion.contractionUnchecked;
+
 pub const scale = TensorOpsVersion.scale;
 pub const scaleUnchecked = TensorOpsVersion.scaleUnchecked;
+
 pub const bias = TensorOpsVersion.bias;
 pub const biasUnchecked = TensorOpsVersion.biasUnchecked;
+
+pub const add = TensorOpsVersion.add;
+pub const addUnchecked = TensorOpsVersion.addUnchecked;
+
+pub const mul = TensorOpsVersion.mul;
+pub const mulUnchecked = TensorOpsVersion.mulUnchecked;
+
+pub const sub = TensorOpsVersion.subUnchecked;
+pub const subUnchecked = TensorOpsVersion.subUnchecked;
+
+pub const absmax = TensorOpsVersion.absmax;
+pub const absmaxUnchecked = TensorOpsVersion.absmaxUnchecked;
+
+pub const absmin = TensorOpsVersion.absmin;
+pub const absminUnchecked = TensorOpsVersion.absminUnchecked;
+
+pub const quantize = TensorOpsVersion.quantize;
+pub const unquantize = TensorOpsVersion.unquantize;
+
 pub const fill = TensorOpsVersion.fill;
-pub const absMax = TensorOpsVersion.absMax;

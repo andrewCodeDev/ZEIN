@@ -260,7 +260,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             if(@TypeOf(x.*) != @TypeOf(y.*)) {
                 @compileError("Addition requires operands to be of the same type.");
             }
-            if(!x.isValid() or y.isValid()){
+            if(!x.isValid() or !y.isValid()){
                 return TensorError.InvalidTensorLayout;
             }
             if(x.valueSize() != y.valueSize()){
@@ -273,11 +273,28 @@ pub fn TensorFactory(comptime value_type: type) type {
             return z;
         }
 
-        pub fn multiply(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
+        pub fn sub(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
+            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+                @compileError("Addition requires operands to be of the same type.");
+            }
+            if(!x.isValid() or !y.isValid()){
+                return TensorError.InvalidTensorLayout;
+            }
+            if(x.valueSize() != y.valueSize()){
+                return OpsError.UnequalSize;
+            }
+            var z = try self.allocTensor(
+                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
+            );
+            Ops.subUnchecked(x, y, &z); 
+            return z;
+        }
+
+        pub fn mul(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
             if(@TypeOf(x.*) != @TypeOf(y.*)) {
                 @compileError("Multipication requires operands to be of the same type.");
             }
-            if(!x.isValid() or y.isValid()){
+            if(!x.isValid() or !y.isValid()){
                 return TensorError.InvalidTensorLayout;
             }
             if(x.valueSize() != y.valueSize()){
@@ -607,4 +624,25 @@ test "inner product 2" {
     try std.testing.expectEqual(w.values[1], 4);
     try std.testing.expectEqual(w.values[2], 6);
     try std.testing.expectEqual(w.values[3], 6);
+}
+
+test "arithmetic 1" {
+
+    var factory = TensorFactory(i64).init(null);
+
+    factory.tracking(.start);
+
+    defer factory.deinit();
+
+    var x = try factory.allocTensor(1, Rowwise, .{ 100_000 });
+    var y = try factory.allocTensor(1, Rowwise, .{ 100_000 });
+
+    Ops.fill(&x, 1, 0);
+    Ops.fill(&y, 2, 0);
+
+    var z = try factory.add(&x, &y);
+
+    const s = try Ops.sum(&z);
+
+    try std.testing.expect(s == 300_000);
 }
