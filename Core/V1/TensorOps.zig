@@ -32,17 +32,7 @@ pub const OpsError = error {
     IntegerOverflow
 };
 
-inline fn uint(comptime size: usize) type {
-    return switch(size) {
-        64 => return u64,
-        32 => return u32,
-        16 => return u16,
-         8 => return u8,
-        else => @compileError("Invalid size passed to uint function.")
-    };
-}
-
-inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
+inline fn reduceInit(comptime op: ReduceOp, comptime T: type) T {
 
     const c = @typeName(T)[0];
 
@@ -95,28 +85,28 @@ inline fn initValue(comptime op: ReduceOp, comptime T: type) T {
 
 pub fn sum(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Add, addGeneric, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Add, addGeneric, x, reduceInit(ReduceOp.Add, @TypeOf(x.*).ValueType));
     } else {
          return OpsError.SizeZeroTensor;
     }
 }
 pub fn product(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Mul, mulGeneric, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Mul, mulGeneric, x, reduceInit(ReduceOp.Mul, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn min(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-        return reduceDispatch(ReduceOp.Min, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
+        return reduceDispatch(ReduceOp.Min, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
-       return reduceDispatch(ReduceOp.Max, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
+       return reduceDispatch(ReduceOp.Max, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
@@ -126,7 +116,7 @@ pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
 pub fn absmax(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
        return mapReduceDispatch(
-            ReduceOp.Max, absGenericUnchecked, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+            ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType)
        );
     } else {
         return OpsError.SizeZeroTensor;
@@ -137,7 +127,7 @@ pub fn absmax(x: anytype) !@TypeOf(x.*).ValueType {
 pub fn absmin(x: anytype) !@TypeOf(x.*).ValueType {
     if(x.valueSize() > 0) {
        return mapReduceDispatch(
-            ReduceOp.Min, absGenericUnchecked, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType)
+            ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType)
        );
     } else {
         return OpsError.SizeZeroTensor;
@@ -147,29 +137,29 @@ pub fn absmin(x: anytype) !@TypeOf(x.*).ValueType {
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absmaxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
     return mapReduceDispatch(
-         ReduceOp.Max, absGenericUnchecked, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType)
+         ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType)
     );
 }
 
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absminUnchecked(x: anytype) @TypeOf(x.*).ValueType {
     return mapReduceDispatch(
-         ReduceOp.Min, absGenericUnchecked, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType)
+         ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType)
     );
 }
 // To complete the set, for those who like to live dangerously... the unchecked versions.
 
 pub fn sumUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Add, addGeneric, x, initValue(ReduceOp.Add, @TypeOf(x.*).ValueType));
+    return reduceDispatch(ReduceOp.Add, addGeneric, x, reduceInit(ReduceOp.Add, @TypeOf(x.*).ValueType));
 }
 pub fn productUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Mul, mulGeneric, x, initValue(ReduceOp.Mul, @TypeOf(x.*).ValueType));
+    return reduceDispatch(ReduceOp.Mul, mulGeneric, x, reduceInit(ReduceOp.Mul, @TypeOf(x.*).ValueType));
 }
 pub fn minUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Min, minGeneric, x, initValue(ReduceOp.Min, @TypeOf(x.*).ValueType));
+    return reduceDispatch(ReduceOp.Min, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType));
 }
 pub fn maxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return reduceDispatch(ReduceOp.Max, maxGeneric, x, initValue(ReduceOp.Max, @TypeOf(x.*).ValueType));
+    return reduceDispatch(ReduceOp.Max, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
 }
 
 pub fn fill(
@@ -207,6 +197,8 @@ pub fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
     arithmeticDispatch(addGeneric, x, y, z);
 }
 
+// <>--------------------------------------------------------<>
+
 pub fn sub(x: anytype, y: anytype, z: anytype) !void {
     if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
@@ -226,6 +218,8 @@ pub fn subUnchecked(x: anytype, y: anytype, z: anytype) void {
     }
     arithmeticDispatch(subGeneric, x, y, z);
 }
+
+// <>--------------------------------------------------------<>
 
 pub fn mul(x: anytype, y: anytype, z: anytype) !void {
     if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
@@ -247,6 +241,8 @@ pub fn mulUnchecked(x: anytype, y: anytype, z: anytype) void {
     arithmeticDispatch(mulGeneric, x, y, z);
 }
 
+// <>--------------------------------------------------------<>
+
 pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
     if(!x.isValid()) {
         return TensorError.InvalidTensorLayout;
@@ -264,6 +260,8 @@ pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void
     }
 }
 
+// <>--------------------------------------------------------<>
+
 pub fn bias(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
     if(!x.isValid()) {
         return TensorError.InvalidTensorLayout;
@@ -280,6 +278,8 @@ pub fn biasUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void 
         y.values[i] = @call(.always_inline, addGeneric, .{ x.values[i], s });
     }
 }
+// <>--------------------------------------------------------<>
+
 inline fn quantizeGeneric(comptime int: type, x: anytype) int {
     return @intFromFloat(@round(x * comptime @as(@TypeOf(x), math.maxInt(int))));
 }
@@ -303,6 +303,7 @@ pub fn quantize(x: anytype, y: anytype) @TypeOf(x.*).ValueType {
     return m;
 }
 
+// <>--------------------------------------------------------<>
 
 inline fn unquantizeGeneric(comptime float: type, x: anytype) float {
     return @as(float, @floatFromInt(x)) / comptime @as(float, @floatFromInt(math.maxInt(@TypeOf(x))));
@@ -528,6 +529,10 @@ pub inline fn recursiveContraction(
     }
 }
 
+// <>--------------------------------------------------------<>
+
+// TODO: Add explanation for this crazy thing...
+
 pub fn innerProduct(
     comptime expression: [] const u8,
     x: anytype,
@@ -597,9 +602,9 @@ pub inline fn recursiveInnerProduct(
     if(I < (plan.total - 1)) {
         var i: IT = 0;
         while(i < size) : (i += 1) {
-            if(plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
-            if(plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
+            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
+            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            if(comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
             @call(.always_inline, recursiveInnerProduct, .{
                  VT, IT, (I + 1), plan, x, y, z, xc, yc, zc
             });
@@ -609,9 +614,9 @@ pub inline fn recursiveInnerProduct(
     else {
         var i: IT = 0;
         while(i < size) : (i += 1) {
-            if(plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
-            if(plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
+            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
+            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            if(comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
             const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
@@ -620,15 +625,17 @@ pub inline fn recursiveInnerProduct(
     }
 }
 
+// <>--------------------------------------------------------<>
+
 fn loopReduce(
-    comptime GenericFunc: anytype, 
+    comptime BinaryFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
     ) @TypeOf(x.*).ValueType {
     var i: usize = 0;
     var rdx = init;
     while(i < x.valueSize()) : (i += 1) {
-        rdx = @call(.always_inline, GenericFunc, .{ rdx, x.values[i] });
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
@@ -636,7 +643,7 @@ fn loopReduce(
 fn vectorizedReduce(
     comptime N: usize, 
     comptime ReduceType: anytype, 
-    comptime GenericFunc: anytype, 
+    comptime BinaryFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
     ) @TypeOf(x.*).ValueType {
@@ -649,18 +656,18 @@ fn vectorizedReduce(
     while((i + N) < x.valueSize()) : (i += N) {
         const slice = x.values[i..N + i];
         const vec: @Vector(N, T) = slice[0..N].*; // needs compile time length
-        rdx = @call(.always_inline, GenericFunc, .{ rdx, @reduce(ReduceType, vec) });
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, @reduce(ReduceType, vec) });
     }
     // reduce remainder...
     while(i < x.valueSize()) : (i += 1) {
-        rdx = @call(.always_inline, GenericFunc, .{ rdx, x.values[i] });
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
 
 fn reduceDispatch(    
     comptime ReduceType: anytype, 
-    comptime GenericFunc: anytype, 
+    comptime BinaryFunc: anytype, 
     x: anytype,
     init: @TypeOf(x.*).ValueType
 ) @TypeOf(x.*).ValueType {
@@ -668,18 +675,20 @@ fn reduceDispatch(
     const size = x.valueSize();
 
     if(size < 128) {
-        return loopReduce(GenericFunc, x, init);
+        return loopReduce(BinaryFunc, x, init);
     }
     else if(size < 256) {
-        return vectorizedReduce(128, ReduceType, GenericFunc, x, init);
+        return vectorizedReduce(128, ReduceType, BinaryFunc, x, init);
     }
     else if(size < 512) {
-        return vectorizedReduce(256, ReduceType, GenericFunc, x, init);
+        return vectorizedReduce(256, ReduceType, BinaryFunc, x, init);
     }
     else {
-        return vectorizedReduce(512, ReduceType, GenericFunc, x, init);
+        return vectorizedReduce(512, ReduceType, BinaryFunc, x, init);
     }
 }
+
+// <>--------------------------------------------------------<>
 
 fn loopArithmetic(
     comptime BinaryFunc: anytype, 
@@ -705,8 +714,10 @@ fn vectorizedArithmetic(
     var j: usize = N;
     var buffer: [N]T = undefined;
     while(j <= x.values.len) : ({i += 512; j += 512; }) {
-        const v: @Vector(N, T) = x.values[0..N].*;
-        const u: @Vector(N, T) = y.values[0..N].*;
+        const xs = x.values[i..j];
+        const ys = y.values[i..j];
+        const v: @Vector(N, T) = xs[0..N].*;
+        const u: @Vector(N, T) = ys[0..N].*;
         buffer = @call(.always_inline, BinaryFunc, .{v, u});
         @memcpy(z.values[i..j], &buffer);
     }
@@ -737,6 +748,8 @@ fn arithmeticDispatch(
         return vectorizedArithmetic(512, BinaryFunc, x, y, z);
     }
 }
+
+// <>--------------------------------------------------------<>
 
 fn loopMapReduce(
     comptime UnaryFunc: anytype, 
@@ -804,6 +817,8 @@ fn mapReduceDispatch(
     }
 }
 
+// <>--------------------------------------------------------<>
+
 inline fn addGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return x + y;
 }
@@ -822,6 +837,8 @@ inline fn maxGeneric(x: anytype, y: anytype) @TypeOf(x) {
 inline fn minGeneric(x: anytype, y: anytype) @TypeOf(x) {
     return @min(x, y);
 }
+
+// <>--------------------------------------------------------<>
 
 pub inline fn absGenericUnchecked(x: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
@@ -863,31 +880,3 @@ pub inline fn absGeneric(x: anytype) !@TypeOf(x) {
         else => @call(.always_inline, absGenericUnchecked, .{ x })
     };
 }
-// We're going to use insertion sort to figure out
-// which stride is the smallest so we can create
-// an efficient permutation-order array.
-
-//fn optimalPermutation(comptime rank: usize, strides: []SizeAndStrideType) [rank]SizeAndStrideType {
-//    var perm: [rank]SizeAndStrideType = undefined;
-//    
-//    var i: usize = 1;
-//    var j: usize = undefined;
-//    var k: usize = undefined;
-//
-//    while(i < rank) : (i += 1) {
-//        perm[i] = i;
-//    }
-//    
-//    while(i < rank) : (i += 1) {
-//        k = strides[perm[i]];
-//        j = i;
-// 
-//        while (j > 0 and strides[perm[j]] > k) {
-//            perm[j] = j;
-//            j -= 1;
-//        }
-//        perm[j] = i;
-//    }
-//    return perm;
-//}
-
