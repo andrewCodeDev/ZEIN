@@ -307,6 +307,28 @@ pub fn TensorFactory(comptime value_type: type) type {
             return z;
         }
 
+        pub fn bias(self: SelfPtr, x: anytype, b: @TypeOf(x.*).ValueType) !@TypeOf(x.*) {
+            if(!x.isValid()){
+                return TensorError.InvalidTensorLayout;
+            }
+            var y = try self.allocTensor(
+                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
+            );
+            Ops.biasUnchecked(x, &y, b); 
+            return y;
+        }
+
+        pub fn scale(self: SelfPtr, x: anytype, s: @TypeOf(x.*).ValueType) !@TypeOf(x.*) {
+            if(!x.isValid()){
+                return TensorError.InvalidTensorLayout;
+            }
+            var y = try self.allocTensor(
+                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
+            );
+            Ops.scaleUnchecked(x, &y, s); 
+            return y;
+        }
+
         pub fn contraction(
             self: SelfPtr, 
             comptime expression: [] const u8, 

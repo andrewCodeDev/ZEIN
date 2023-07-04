@@ -244,39 +244,33 @@ pub fn mulUnchecked(x: anytype, y: anytype, z: anytype) void {
 // <>--------------------------------------------------------<>
 
 pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid()) {
+    if(!x.isValid() or !y.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, mulGeneric, .{ x.values[i], s });
+    if(x.valueSize() != y.valueSize()) {
+        return OpsError.UnequalSize;
     }
+    scalarBroadcastDispatch(mulGeneric, x, y, s);
 }
 
 pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, mulGeneric, .{ x.values[i], s });
-    }
+    scalarBroadcastDispatch(mulGeneric, x, y, s);
 }
 
 // <>--------------------------------------------------------<>
 
-pub fn bias(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid()) {
+pub fn bias(x: anytype, y: @TypeOf(x), b: @TypeOf(x.*).ValueType) !void {
+    if(!x.isValid() or !y.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, addGeneric, .{ x.values[i], s });
+    if(x.valueSize() != y.valueSize()) {
+        return OpsError.UnequalSize;
     }
+    scalarBroadcastDispatch(addGeneric, x, y, b);
 }
 
-pub fn biasUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void {
-    var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, addGeneric, .{ x.values[i], s });
-    }
+pub fn biasUnchecked(x: anytype, y: @TypeOf(x), b: @TypeOf(x.*).ValueType) void {
+    scalarBroadcastDispatch(addGeneric, x, y, b);
 }
 // <>--------------------------------------------------------<>
 
@@ -713,7 +707,7 @@ fn vectorizedArithmetic(
     var i: usize = 0;
     var j: usize = N;
     var buffer: [N]T = undefined;
-    while(j <= x.values.len) : ({i += 512; j += 512; }) {
+    while(j <= x.values.len) : ({i += N; j += N; }) {
         const xs = x.values[i..j];
         const ys = y.values[i..j];
         const v: @Vector(N, T) = xs[0..N].*;
@@ -814,6 +808,67 @@ fn mapReduceDispatch(
     }
     else {
         return vectorizedMapReduce(512, ReduceType, UnaryFunc, BinaryFunc, x, init);
+    }
+}
+
+// <>--------------------------------------------------------<>
+
+fn loopScalarBroadcast(
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    y: anytype,
+    s: @TypeOf(x.*).ValueType
+    ) void {
+    var i: usize = 0;
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], s }); 
+    }
+}
+
+fn vectorizedScalarBroadcast(
+    comptime N: usize, 
+    comptime BinaryFunc: anytype, 
+    x: anytype,
+    y: anytype,
+    s: @TypeOf(x.*).ValueType
+    ) void {
+    const T = @TypeOf(x.*).ValueType;
+    // broadcast in size N chunks...
+    var i: usize = 0;
+    var j: usize = N;
+    const u = @splat(N, s);
+    var buffer: [N]T = undefined;
+    while(j <= x.values.len) : ({i += N; j += N; }) {
+        const xs = x.values[i..j];
+        const v: @Vector(N, T) = xs[0..N].*;
+        buffer = @call(.always_inline, BinaryFunc, .{v, u});
+        @memcpy(y.values[i..j], &buffer);
+    }
+    // broadcast remainder...
+    while(i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], s });
+    }
+}
+
+fn scalarBroadcastDispatch(    
+    comptime BinaryFunc: anytype,
+    x: anytype,
+    y: anytype,
+    s: @TypeOf(x.*).ValueType
+) @TypeOf(x.*).ValueType {
+    const size = x.valueSize();
+
+    if(size < 128) {
+        return loopScalarBroadcast(BinaryFunc, x, y, s);
+    }
+    else if(size < 256) {
+        return vectorizedScalarBroadcast(128, BinaryFunc, x, y, s);
+    }
+    else if(size < 512) {
+        return vectorizedScalarBroadcast(256, BinaryFunc, x, y, s);
+    }
+    else {
+        return vectorizedScalarBroadcast(512, BinaryFunc, x, y, s);
     }
 }
 
