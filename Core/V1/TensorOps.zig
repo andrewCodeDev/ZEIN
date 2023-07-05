@@ -21,8 +21,8 @@ pub const InnerProductPlan = @import("ExpressionParsing.zig").InnerProductPlan;
 pub const defaultPermuation = @import("SizesAndStrides.zig").defaultPermutation;
 pub const contractionParse = @import("ExpressionParsing.zig").contractionParse;
 pub const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
+pub const outerProductParse = @import("ExpressionParsing.zig").outerProductParse;
 pub const computeTensorIndex = @import("Tensor.zig").computeTensorIndex;
-
 
 pub const OpsError = error {
     UnequalSize,
@@ -536,9 +536,6 @@ pub fn innerProduct(
     if(!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-
-    // TODO: Add dimension checks for compatible indexing
-
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
@@ -546,6 +543,15 @@ pub fn innerProduct(
     const plan = comptime innerProductParse(
         XT.Rank, YT.Rank, ZT.Rank, expression
     );
+
+    for(0..plan.total) |i| {
+        if(plan.x_perm[i] != plan.pass and plan.y_perm[i] != plan.pass) {
+            if(x.getSize(plan.x_perm[i]) != y.getSize(plan.y_perm[i])) {
+                return OpsError.InvalidDimensions;
+            }
+        }
+    // TODO: Add a check for output dimensions...
+    }
 
     var x_i: [XT.Rank]XT.SizesType = undefined;
     var y_i: [YT.Rank]YT.SizesType = undefined;
@@ -611,6 +617,92 @@ pub inline fn recursiveInnerProduct(
             if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
             if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
             if(comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
+            const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
+            const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
+            const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
+            z.values[z_n] += x.values[x_n] * y.values[y_n];
+        }
+    }
+}
+
+// <>--------------------------------------------------------<>
+
+// TODO: Add explanation for this crazy thing...
+
+pub fn outerProduct(
+    comptime expression: [] const u8,
+    x: anytype,
+    y: anytype,
+    z: anytype) !void {
+
+    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+        return TensorError.InvalidTensorLayout;
+    }
+    const XT = @TypeOf(x.*);
+    const YT = @TypeOf(y.*);
+    const ZT = @TypeOf(z.*);
+
+    const plan = comptime outerProductParse(
+        XT.Rank, YT.Rank, ZT.Rank, expression
+    );
+
+    for(plan.x_perm, plan.y_perm, plan.z_perm) |xp, yp, zp| {
+        if(xp != plan.pass and x.getSize(xp) != z.getSize(zp))
+            return OpsError.InvalidDimensions;
+        if(yp != plan.pass and y.getSize(yp) != z.getSize(zp))
+            return OpsError.InvalidDimensions;
+    }
+
+    var x_i: [XT.Rank]XT.SizesType = undefined;
+    var y_i: [YT.Rank]YT.SizesType = undefined;
+    var z_i: [ZT.Rank]ZT.SizesType = undefined;
+    
+    @memset(z.values, 0);
+    
+    @call(.always_inline, recursiveInnerProduct, .{
+        XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i 
+    });
+}
+
+pub inline fn recursiveOuterProduct(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime I: usize, // starting index
+    comptime plan: anytype, // InnerProductPlan
+    x: anytype, // lhs operand tensor
+    y: anytype, // rhs operand tensor
+    z: anytype, // output tensor
+    xc: *[@TypeOf(x.*).Rank]IT, // index container
+    yc: *[@TypeOf(y.*).Rank]IT, // index container
+    zc: *[@TypeOf(z.*).Rank]IT, // index container
+) void {
+
+    const XT = @TypeOf(x.*);
+    const YT = @TypeOf(x.*);
+    const ZT = @TypeOf(x.*);
+
+    const size = @call(.always_inline, sizeSelector,
+        .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y }
+    );
+
+    if(I < (plan.total - 1)) {
+        var i: IT = 0;
+        while(i < size) : (i += 1) {
+            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
+            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            zc[plan.z_perm[I]] = i;
+            @call(.always_inline, recursiveInnerProduct, .{
+                 VT, IT, (I + 1), plan, x, y, z, xc, yc, zc
+            });
+        }
+    }
+
+    else {
+        var i: IT = 0;
+        while(i < size) : (i += 1) {
+            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
+            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            zc[plan.z_perm[I]] = i;
             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
             const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);

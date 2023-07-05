@@ -178,7 +178,7 @@ pub fn contractedRank(comptime str: [] const u8) usize {
     return (str.len - (comptime findArrowOp(str)).head) - 1;
 }
 
-pub fn ContractionPair(comptime lRank: usize, comptime rRank: usize) type {
+pub fn ContractionPlan(comptime lRank: usize, comptime rRank: usize) type {
     return struct {
         lhs : [lRank]SizesType = undefined,
         rhs : [rRank]SizesType = undefined,
@@ -189,7 +189,8 @@ pub fn contractionParse(
     comptime lRank: usize,
     comptime rRank: usize,
     comptime str: [] const u8
-) ContractionPair(lRank, rRank) {
+    ) ContractionPlan(lRank, rRank) {
+
     comptime var index: usize = 0;
 
     const arrow = comptime findArrowOp(str);
@@ -270,7 +271,7 @@ pub fn contractionParse(
     inline while(index < lhs.len) : ({ index += 1; rem_i += 1; }){
         x_indices[index] = remainder[rem_i];
     }   
-    return ContractionPair(lRank, rRank){ .lhs = x_indices, .rhs = y_indices };
+    return ContractionPlan(lRank, rRank){ .lhs = x_indices, .rhs = y_indices };
 }
 
 ///////////////////////
@@ -294,7 +295,8 @@ pub fn innerProductParse(
     comptime XRank: usize,
     comptime YRank: usize,
     comptime ZRank: usize,
-    comptime expression: [] const u8) InnerProductPlan(countUniqueAlpha(expression)) {
+    comptime expression: [] const u8
+    ) InnerProductPlan(countUniqueAlpha(expression)) {
 
     const arrow = comptime findArrowOp(expression);
     const comma = comptime findCommaOp(expression);
@@ -361,6 +363,102 @@ pub fn innerProductParse(
             if(rhs[j] == chars[i]) { 
                 plan.y_perm[i] = j;
                 plan.s_ctrl[i] = 1;
+            }
+        }
+        j = 0;
+        inline while(j < out.len) : (j += 1) {
+            if(out[j] == chars[i]) { 
+                plan.z_perm[i] = j;
+            }
+        }
+    }
+    return plan;
+}
+
+
+pub fn OuterProductPlan(comptime N: usize) type {
+
+    const pass_flag: usize = 9999;
+    
+    return struct {
+        pass: usize = pass_flag,
+        x_perm: [N]usize = .{ pass_flag } ** N,
+        y_perm: [N]usize = .{ pass_flag } ** N,
+        z_perm: [N]usize = .{ pass_flag } ** N,
+        total: usize = N,
+    };
+}
+
+pub fn outerProductParse(
+    comptime XRank: usize,
+    comptime YRank: usize,
+    comptime ZRank: usize,
+    comptime expression: [] const u8
+    ) OuterProductPlan(countUniqueAlpha(expression)) {
+
+    const arrow = comptime findArrowOp(expression);
+    const comma = comptime findCommaOp(expression);
+
+    if(comma >= (arrow.tail - 1)) {
+        @compileError("Comma operator must come before left operand: " ++ expression);
+    }
+
+    const lhs = expression[0..comma];
+    const rhs = expression[comma+1..arrow.tail];
+    const out = expression[arrow.head+1..];
+
+    if(lhs.len == 0) {
+        @compileError("Empty left-side operand: " ++ expression);
+    }
+    if(rhs.len == 0) {
+        @compileError("Empty right-side operand: " ++ expression);
+    }
+    if(out.len == 0) {
+        @compileError("Empty expression result: " ++ expression);
+    }
+    if(lhs.len != XRank) {
+        @compileError("Provided indices do not match left-side operand rank: " ++ lhs);
+    }
+    if(rhs.len != YRank) {
+        @compileError("Provided indices do not match right-side operand rank: " ++ rhs);
+    }
+    if(out.len != ZRank) {
+        @compileError("Provided indices do not match result rank: " ++ out);
+    }
+    if(!comptime allAlpha(lhs)) {
+        @compileError("Non-alphabetical character found in: " ++ lhs);
+    }
+    if(!comptime allAlpha(rhs)) {
+        @compileError("Non-alphabetical character found in: " ++ rhs);
+    }
+    if(!comptime allAlpha(out)) {
+        @compileError("Non-alphabetical character found in: " ++ out);
+    }
+
+    ////////////////////////////////////////
+    // build inner product control indices
+
+    const N = countUniqueAlpha(expression);
+
+    comptime var plan = OuterProductPlan(N){ };
+
+    // loop index variables
+    comptime var i = 0;
+    comptime var j = 0;    
+    comptime var chars = uniqueAlpha(expression);
+
+    i = 0;
+    inline while(i < N) : (i += 1) {
+        j = 0;
+        inline while(j < lhs.len) : (j += 1) {
+            if(lhs[j] == chars[i]) { 
+                plan.x_perm[i] = j;
+            }
+        }
+        j = 0;
+        inline while(j < rhs.len) : (j += 1) {
+            if(rhs[j] == chars[i]) { 
+                plan.y_perm[i] = j;
             }
         }
         j = 0;
