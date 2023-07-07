@@ -822,16 +822,16 @@ fn arithmeticDispatch(
     const size = x.valueSize();
 
     if(size < 128) {
-        return loopArithmetic(BinaryFunc, x, y, z);
+        loopArithmetic(BinaryFunc, x, y, z);
     }
     else if(size < 256) {
-        return vectorizedArithmetic(128, BinaryFunc, x, y, z);
+        vectorizedArithmetic(128, BinaryFunc, x, y, z);
     }
     else if(size < 512) {
-        return vectorizedArithmetic(256, BinaryFunc, x, y, z);
+        vectorizedArithmetic(256, BinaryFunc, x, y, z);
     }
     else {
-        return vectorizedArithmetic(512, BinaryFunc, x, y, z);
+        vectorizedArithmetic(512, BinaryFunc, x, y, z);
     }
 }
 
@@ -947,20 +947,20 @@ fn scalarBroadcastDispatch(
     x: anytype,
     y: anytype,
     s: @TypeOf(x.*).ValueType
-) @TypeOf(x.*).ValueType {
+) void {
     const size = x.valueSize();
 
     if(size < 128) {
-        return loopScalarBroadcast(BinaryFunc, x, y, s);
+        loopScalarBroadcast(BinaryFunc, x, y, s);
     }
     else if(size < 256) {
-        return vectorizedScalarBroadcast(128, BinaryFunc, x, y, s);
+        vectorizedScalarBroadcast(128, BinaryFunc, x, y, s);
     }
     else if(size < 512) {
-        return vectorizedScalarBroadcast(256, BinaryFunc, x, y, s);
+        vectorizedScalarBroadcast(256, BinaryFunc, x, y, s);
     }
     else {
-        return vectorizedScalarBroadcast(512, BinaryFunc, x, y, s);
+        vectorizedScalarBroadcast(512, BinaryFunc, x, y, s);
     }
 }
 

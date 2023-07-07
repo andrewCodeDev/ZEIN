@@ -303,7 +303,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             var z = try self.allocTensor(
                 @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
             );
-            Ops.multiplyUnchecked(x, y, &z); 
+            Ops.mulUnchecked(x, y, &z); 
             return z;
         }
 
@@ -658,13 +658,66 @@ test "arithmetic 1" {
 
     var x = try factory.allocTensor(1, Rowwise, .{ 100_000 });
     var y = try factory.allocTensor(1, Rowwise, .{ 100_000 });
-
     Ops.fill(&x, 1, 0);
     Ops.fill(&y, 2, 0);
 
-    var z = try factory.add(&x, &y);
+    // factory versions...
+    {
+        var z = try factory.add(&x, &y);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 300_000);
+    }
+    {
+        var z = try factory.mul(&x, &y);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 200_000);
+    }
+    {
+        var z = try factory.sub(&x, &y);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == -100_000);
+    }
+    {
+        var b: i64 = 4;
+        var z = try factory.bias(&x, b);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 500_000);
+    }
+    {
+        var b: i64 = 4;
+        var z = try factory.scale(&x, b);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 400_000);
+    }
 
-    const s = try Ops.sum(&z);
+    var z = try factory.allocTensor(1, Rowwise, .{ 100_000 });
 
-    try std.testing.expect(s == 300_000);
+    // free versions...
+    {
+        try Ops.add(&x, &y, &z);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 300_000);
+    }
+    {
+        try Ops.mul(&x, &y, &z);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 200_000);
+    }
+    {
+        try Ops.sub(&x, &y, &z);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == -100_000);
+    }
+    {
+        var b: i64 = 4;
+        try Ops.bias(&x, &z, b);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 500_000);
+    }
+    {
+        var b: i64 = 4;
+        try Ops.scale(&x, &z, b);
+        const s = try Ops.sum(&z);
+        try std.testing.expect(s == 400_000);
+    }
 }
