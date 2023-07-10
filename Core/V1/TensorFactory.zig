@@ -34,6 +34,8 @@ const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
 const contractedRank = @import("ExpressionParsing.zig").contractedRank;
 const sliceProduct = @import("Utility.zig").sliceProduct;
 
+const LinearCachingAllocator = @import("LinearCachingAllocator.zig").LinearCachingAllocator;
+
 pub const AllocatorError = error {
     UnknownObject,
     TensorSizeZero,
@@ -57,38 +59,46 @@ const Mutex = @import("std").Thread.Mutex;
 // large enough to handle anything reasonable (and then some...)
 
 // GPA for null initialized tensor allocators.
-const GPA = std.heap.GeneralPurposeAllocator(.{ });
+const LCA = LinearCachingAllocator;
 
 // A number large enough that it shouldn't matter.
 const BufferSize = 100;
 var BufferMutex = Mutex{};
-var GPABuffer: [BufferSize]?GPA = undefined;
-var GPAUsed: usize = 0;
+var LCABuffer: [BufferSize]?LCA = undefined;
+var LCAUsed: usize = 0;
 
-fn constructGpaIndex() usize {
+fn constructLCA() Allocator {
     BufferMutex.lock();
-
     defer BufferMutex.unlock();
-
     var i: usize = 0;
-
     while(i < BufferSize) : (i += 1){
-        if (GPABuffer[i] == null) { 
-            GPABuffer[i] = GPA{};
-            return i; 
+        if (LCABuffer[i] == null) { 
+            LCABuffer[i] = LCA{ };
+            return LCABuffer[i].?.allocator(); 
         }
     }
     @panic("Too many tensor allocator instances.");
 }
 
-/////////////////////////////////////////
-// only call this after calling deinit!!!
-fn nullifyGpaIndex(index: usize) void {
+fn nullifyLCA(expired: *anyopaque) void {
     BufferMutex.lock();
+    defer BufferMutex.unlock();
+    for(0..BufferSize) |i| {
+        if(LCABuffer[i]) |*lca| {
+            if (@intFromPtr(lca) == @intFromPtr(expired)) { 
+                LCABuffer[i].?.deinit();
+                LCABuffer[i] = null;
+            }
+        }
+    }
+}
 
-    GPABuffer[index] = null;
-
-    BufferMutex.unlock();
+fn isDefaultLCA(ptr: *anyopaque) bool {
+    const buffer_a = @intFromPtr(&LCABuffer[0]);
+    const buffer_b = @intFromPtr(&LCABuffer[BufferSize - 1]);
+    const check = @intFromPtr(ptr);
+    // check if we are inbounds of the static array
+    return (buffer_a <= check) or (check <= buffer_b);
 }
 
 const TrackingMode = enum {
@@ -128,24 +138,15 @@ pub fn TensorFactory(comptime value_type: type) type {
 
         const TrackingData = ArrayList([]ValueType);
 
-        gpa_index: usize,
         allocator: Allocator,
         tracking_data: TrackingData,
         tracking_mode: TrackingMode,
 
         pub fn init(allocator: ?Allocator) Self {
 
-            const index = constructGpaIndex();
-
-            var gpa: *GPA = undefined;
-
-            if(GPABuffer[index]) |*a| {
-                gpa = a;
-            }
             return Self { 
-                .gpa_index = index,
-                .allocator = if(allocator)|a| a else gpa.allocator(),
-                .tracking_data = TrackingData.init(gpa.allocator()),
+                .allocator = if(allocator) |a| a else constructLCA(),
+                .tracking_data = TrackingData.init(std.heap.page_allocator),
                 .tracking_mode = TrackingMode.free,
             };
         }
@@ -155,10 +156,10 @@ pub fn TensorFactory(comptime value_type: type) type {
 
             self.tracking_data.deinit();
 
-            if(GPABuffer[self.gpa_index]) |*a| {
-                if (a.deinit() == .leak) { @panic("LEAK DETECTED"); }
+            // check if we need to nullify an LCA
+            if(isDefaultLCA(self.allocator.ptr)) {
+                nullifyLCA(self.allocator.ptr);
             }
-            nullifyGpaIndex(self.gpa_index);
         }
 
         ///////////////////////////////////
