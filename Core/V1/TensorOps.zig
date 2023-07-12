@@ -678,8 +678,8 @@ pub inline fn recursiveOuterProduct(
 ) void {
 
     const XT = @TypeOf(x.*);
-    const YT = @TypeOf(x.*);
-    const ZT = @TypeOf(x.*);
+    const YT = @TypeOf(y.*);
+    const ZT = @TypeOf(z.*);
 
     const size = @call(.always_inline, sizeSelector,
         .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y }
