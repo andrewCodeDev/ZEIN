@@ -392,6 +392,7 @@ pub fn TensorFactory(comptime value_type: type) type {
                     }
                 }
             }
+
             var z = try self.allocTensor(ZRank, @TypeOf(x.*).Order, z_sizes);
             var x_i: [XRank]SizesType = undefined;
             var y_i: [YRank]SizesType = undefined;
@@ -628,25 +629,27 @@ test "inner product 2" {
 
     defer factory.deinit();
 
-    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var x = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
+    var y = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
 
-    Ops.fill(&x, 1, 0);
-    Ops.fill(&y, 1, 1);
+    Ops.fill(&x, 0, 1);
+    Ops.fill(&y, 0, 1);
 
-    var z = try factory.innerProduct("ij,jk->ik", &x, &y);
+    var z = try factory.innerProduct("ijk,kjm->im", &x, &y);
 
-    try std.testing.expectEqual(z.values[0], 4);
-    try std.testing.expectEqual(z.values[1], 6);
-    try std.testing.expectEqual(z.values[2], 4);
-    try std.testing.expectEqual(z.values[3], 6);
+    try std.testing.expectEqual(z.values[0], 100);
+    try std.testing.expectEqual(z.values[1], 115);
+    try std.testing.expectEqual(z.values[2], 280);
+    try std.testing.expectEqual(z.values[3], 331);
 
-    var w = try factory.innerProduct("ij,jk->ki", &x, &y);
+    var w = try factory.innerProduct("ikj,jkl->kl", &x, &y);
 
-    try std.testing.expectEqual(w.values[0], 4);
-    try std.testing.expectEqual(w.values[1], 4);
-    try std.testing.expectEqual(w.values[2], 6);
-    try std.testing.expectEqual(w.values[3], 6);
+    try std.testing.expectEqual(w.values[0],  48);
+    try std.testing.expectEqual(w.values[1],  62);
+    try std.testing.expectEqual(w.values[2], 116);
+    try std.testing.expectEqual(w.values[3], 138);
+    try std.testing.expectEqual(w.values[4], 216);
+    try std.testing.expectEqual(w.values[5], 246);
 }
 
 test "arithmetic 1" {
