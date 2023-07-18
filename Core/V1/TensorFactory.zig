@@ -398,7 +398,51 @@ pub fn TensorFactory(comptime value_type: type) type {
             var y_i: [YRank]SizesType = undefined;
             var z_i: [ZRank]SizesType = undefined;
             
+            // TODO: Refactor - this is the only thing that differs from linear.
             @memset(z.values, 0);
+            
+            @call(.always_inline, Ops.recursiveInnerProduct, .{
+                ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i
+            });
+            return z;
+        }
+
+        pub fn linear(
+            self: SelfPtr, 
+            comptime expression: [] const u8, 
+            x: anytype,
+            y: anytype,
+            b: anytype
+            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+
+            if(!x.isValid() or !y.isValid()) {
+                return TensorError.InvalidTensorLayout;
+            }
+            const XRank = @TypeOf(x.*).Rank;
+            const YRank = @TypeOf(y.*).Rank;
+            const ZRank = comptime contractedRank(expression);
+            const plan = comptime innerProductParse(XRank, YRank, ZRank, expression);
+
+            var z_sizes: [ZRank]SizesType = undefined;
+            {
+                var i: usize = 0;
+                while(i < plan.total) : (i += 1) {
+                    if(plan.z_perm[i] == plan.pass) {
+                        continue;
+                    } else if(plan.s_ctrl[i] == 0){
+                        z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
+                    } else {
+                        z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
+                    }
+                }
+            }
+
+            var x_i: [XRank]SizesType = undefined;
+            var y_i: [YRank]SizesType = undefined;
+            var z_i: [ZRank]SizesType = undefined;
+
+            // TODO: Refactor - this is the only thing that differs from innerProduct
+            var z = self.copyTensor(b);
             
             @call(.always_inline, Ops.recursiveInnerProduct, .{
                 ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i

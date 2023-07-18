@@ -928,7 +928,7 @@ fn vectorizedScalarBroadcast(
     // broadcast in size N chunks...
     var i: usize = 0;
     var j: usize = N;
-    const u = @splat(N, s);
+    const u: @Vector(N, T) = @splat(s);
     var buffer: [N]T = undefined;
     while(j <= x.values.len) : ({i += N; j += N; }) {
         const xs = x.values[i..j];

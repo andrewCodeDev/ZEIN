@@ -10,7 +10,6 @@ pub const SizesAndStrides = SizesAndStridesVersion.SizesAndStrides;
 const TensorVersion = @import("Core/V1/Tensor.zig");
 pub const Tensor = TensorVersion.Tensor;
 pub const TensorError = TensorVersion.TensorError;
-pub const OrderType = TensorVersion.OrderType;
 pub const Rowwise = TensorVersion.Rowwise;
 pub const Colwise = TensorVersion.Colwise;
 
