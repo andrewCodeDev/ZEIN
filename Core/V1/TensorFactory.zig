@@ -77,7 +77,9 @@ fn constructLCA() Allocator {
             return LCABuffer[i].?.allocator(); 
         }
     }
-    @panic("Too many tensor allocator instances.");
+    // this seems like a sensible default if
+    // the user creates more than 100 defaults.
+    return std.heap.page_allocator;
 }
 
 fn nullifyLCA(expired: *anyopaque) void {
@@ -98,7 +100,7 @@ fn isDefaultLCA(ptr: *anyopaque) bool {
     const buffer_b = @intFromPtr(&LCABuffer[BufferSize - 1]);
     const check = @intFromPtr(ptr);
     // check if we are inbounds of the static array
-    return (buffer_a <= check) or (check <= buffer_b);
+    return (buffer_a <= check) and (check <= buffer_b);
 }
 
 const TrackingMode = enum {
