@@ -51,7 +51,7 @@ inline fn reduceInit(comptime op: ReduceOp, comptime T: type) T {
     }
     else if(op == ReduceOp.Max) {
         if(c == 102) { // "f"
-            return math.floatMin(T);
+            return -math.floatMax(T);
         } else {
             return math.minInt(T);
         }
