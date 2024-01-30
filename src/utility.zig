@@ -1,6 +1,11 @@
 /// src/utility.zig
 const std = @import("std");
 const tensor = @import("./tensor.zig");
+const builtin = @import("builtin");
+
+// use this to compile out safety checks
+// and enforce invariants for debug builds.
+const debug: bool = (builtin.mode == .Debug);
 
 pub fn arrayProduct(comptime rank: usize, comptime T: type, values: *const [rank]T) T {
     const s: @Vector(rank, T) = values.*;

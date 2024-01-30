@@ -52,10 +52,21 @@ const Permutate = @import("./permutate.zig");
 // Tensor Utilities...
 pub const TensorError = error{ InvalidTensorLayout, InvalidPermutation, AllocSizeMismatch, CapacityMismatch, RankMismatch };
 
-pub inline fn computeTensorIndex(comptime rank: usize, comptime value_type: type, strides: *const [rank]value_type, indices: [rank]value_type) value_type {
-    const i: @Vector(rank, value_type) = indices;
-    const s: @Vector(rank, value_type) = strides.*;
-    return @reduce(ReduceOp.Add, s * i);
+pub inline fn computeTensorIndex(
+    comptime rank: usize, 
+    comptime size_type: type, 
+    strides: []size_type, 
+    indices: []size_type
+) size_type {
+    return switch(rank) {
+        1 => indices[0], // direct index... just an array
+        2 => indices[0] * strides[0] + indices[1] * strides[1],
+        else => blk: { // inner product between indices and strides
+            const s: @Vector(rank, size_type) = strides[0..rank];
+            const i: @Vector(rank, size_type) = indices[0..rank];
+            break :blk @reduce(ReduceOp.Add, s * i);
+        },
+    };
 }
 
 ///////////////////////////
