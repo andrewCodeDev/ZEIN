@@ -1,4 +1,3 @@
-
 // TensorFactory Implementation file. Before proceeding, please read the following:
 
 ///////////////////////////////////
@@ -10,7 +9,7 @@
 // because that is ultimately a memory operation.
 
 // Fundamentally, this class can be avoided if you intend to use your own
-// allocations to assign to tensor values. The allocatoins will still be 
+// allocations to assign to tensor values. The allocatoins will still be
 // checked if using the default functions.
 
 // Allocators still need to have the deinit() function called as per usual.
@@ -18,32 +17,25 @@
 // Zein import files...
 const std = @import("std");
 const Allocator = @import("std").mem.Allocator;
-const Tensor = @import("Tensor.zig").Tensor;
-const TensorError = @import("Tensor.zig").TensorError;
-const SizesAndStridesType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
+const Tensor = @import("./tensor.zig").Tensor;
+const TensorError = @import("./tensor.zig").TensorError;
+const SizesAndStridesType = @import("./sizes_and_strides.zig").SizeAndStride.ValueType;
 
-const SizeAndStride = @import("SizesAndStrides.zig").SizeAndStride;
-const SizesAndStrides = @import("SizesAndStrides.zig").SizesAndStrides;
-const OrderType = @import("SizesAndStrides.zig").OrderType;
-const Rowwise = @import("SizesAndStrides.zig").Rowwise;
-const Colwise = @import("SizesAndStrides.zig").Colwise;
-const Ops = @import("TensorOps.zig");
-const OpsError = @import("TensorOps.zig").OpsError;
-const contractionParse = @import("ExpressionParsing.zig").contractionParse;
-const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
-const contractedRank = @import("ExpressionParsing.zig").contractedRank;
-const sliceProduct = @import("Utility.zig").sliceProduct;
+const SizeAndStride = @import("./sizes_and_strides.zig").SizeAndStride;
+const SizesAndStrides = @import("./sizes_and_strides.zig").SizesAndStrides;
+const OrderType = @import("./sizes_and_strides.zig").OrderType;
+const Rowwise = @import("./sizes_and_strides.zig").Rowwise;
+const Colwise = @import("./sizes_and_strides.zig").Colwise;
+const Ops = @import("./tensor_ops.zig");
+const OpsError = @import("./tensor_ops.zig").OpsError;
+const contractionParse = @import("./expression_parsing.zig").contractionParse;
+const innerProductParse = @import("./expression_parsing.zig").innerProductParse;
+const contractedRank = @import("./expression_parsing.zig").contractedRank;
+const sliceProduct = @import("./utility.zig").sliceProduct;
 
-const LinearCachingAllocator = @import("LinearCachingAllocator.zig").LinearCachingAllocator;
+const LinearCachingAllocator = @import("./linear_caching_allocator.zig").LinearCachingAllocator;
 
-pub const AllocatorError = error {
-    UnknownObject,
-    TensorSizeZero,
-    TensorHasAlloc,
-    WrongAllocator,
-    IndexAlreadyFreed,
-    InvalidIndex
-};
+pub const AllocatorError = error{ UnknownObject, TensorSizeZero, TensorHasAlloc, WrongAllocator, IndexAlreadyFreed, InvalidIndex };
 
 // used to keep track of tensor allocations
 const ArrayList = @import("std").ArrayList;
@@ -71,10 +63,10 @@ fn constructLCA() Allocator {
     BufferMutex.lock();
     defer BufferMutex.unlock();
     var i: usize = 0;
-    while(i < BufferSize) : (i += 1){
-        if (LCABuffer[i] == null) { 
-            LCABuffer[i] = LCA{ };
-            return LCABuffer[i].?.allocator(); 
+    while (i < BufferSize) : (i += 1) {
+        if (LCABuffer[i] == null) {
+            LCABuffer[i] = LCA{};
+            return LCABuffer[i].?.allocator();
         }
     }
     // this seems like a sensible default if
@@ -85,9 +77,9 @@ fn constructLCA() Allocator {
 fn nullifyLCA(expired: *anyopaque) void {
     BufferMutex.lock();
     defer BufferMutex.unlock();
-    for(0..BufferSize) |i| {
-        if(LCABuffer[i]) |*lca| {
-            if (@intFromPtr(lca) == @intFromPtr(expired)) { 
+    for (0..BufferSize) |i| {
+        if (LCABuffer[i]) |*lca| {
+            if (@intFromPtr(lca) == @intFromPtr(expired)) {
                 LCABuffer[i].?.deinit();
                 LCABuffer[i] = null;
             }
@@ -103,35 +95,29 @@ fn isDefaultLCA(ptr: *anyopaque) bool {
     return (buffer_a <= check) and (check <= buffer_b);
 }
 
-const TrackingMode = enum {
-    start, 
-    stop,
-    free
-};
+const TrackingMode = enum { start, stop, free };
 
 // let m = current mode;
 // if m == start:
 //    free: dealocate memory, m -> free
 //    stop: no-op, m -> stop
 //
-// if m == stop: 
+// if m == stop:
 //    free: dealocate memory, m -> free
 //    start: no-op, m -> start
 //
-// if m == free: 
+// if m == free:
 //    start: no-op, m -> start
 //    stop: no-op, m -> free
 
 pub fn TensorFactory(comptime value_type: type) type {
-
     return struct {
-
         const Self = @This();
 
         const SelfPtr = *Self;
-        
+
         const ConstSelfPtr = *const Self;
-        
+
         const ValueType = value_type;
 
         const ValueSlice = []ValueType;
@@ -145,9 +131,8 @@ pub fn TensorFactory(comptime value_type: type) type {
         tracking_mode: TrackingMode,
 
         pub fn init(allocator: ?Allocator) Self {
-
-            return Self { 
-                .allocator = if(allocator) |a| a else constructLCA(),
+            return Self{
+                .allocator = if (allocator) |a| a else constructLCA(),
                 .tracking_data = TrackingData.init(std.heap.page_allocator),
                 .tracking_mode = TrackingMode.free,
             };
@@ -159,7 +144,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             self.tracking_data.deinit();
 
             // check if we need to nullify an LCA
-            if(isDefaultLCA(self.allocator.ptr)) {
+            if (isDefaultLCA(self.allocator.ptr)) {
                 nullifyLCA(self.allocator.ptr);
             }
         }
@@ -168,26 +153,23 @@ pub fn TensorFactory(comptime value_type: type) type {
         // private allocation functions ///
 
         fn allocValues(self: SelfPtr, size: usize) !ValueSlice {
+            const alloc = try self.allocator.alloc(ValueType, size);
 
-            var alloc = try self.allocator.alloc(ValueType, size);
-
-            if(self.tracking_mode == .start){
+            if (self.tracking_mode == .start) {
                 try self.tracking_data.append(alloc);
             }
             return alloc;
         }
 
         fn freeValues(self: SelfPtr, values: ValueSlice) !void {
-
-            if(self.tracking_mode == .start) {
-                for(self.tracking_data.items) |data| {
-                    if(values.ptr == data.ptr) {
+            if (self.tracking_mode == .start) {
+                for (self.tracking_data.items) |data| {
+                    if (values.ptr == data.ptr) {
                         return;
                     }
                 }
-                try self.tracking_data.append(values);  
-            }
-            else {
+                try self.tracking_data.append(values);
+            } else {
                 self.allocator.free(values);
             }
         }
@@ -196,12 +178,11 @@ pub fn TensorFactory(comptime value_type: type) type {
         // Change the tracking mode ///////
 
         pub fn tracking(self: SelfPtr, mode: TrackingMode) void {
-
-            if(self.tracking_mode == .free and mode == .stop) {
+            if (self.tracking_mode == .free and mode == .stop) {
                 return; // free is inherently not tracking, so stay free
             }
-            if((self.tracking_mode == .start or self.tracking_mode == .stop) and mode == .free) {
-                while(self.tracking_data.items.len > 0) { 
+            if ((self.tracking_mode == .start or self.tracking_mode == .stop) and mode == .free) {
+                while (self.tracking_data.items.len > 0) {
                     self.allocator.free(self.tracking_data.pop());
                 }
             }
@@ -212,46 +193,40 @@ pub fn TensorFactory(comptime value_type: type) type {
         // Tensor Allocation functions ///
 
         pub fn allocToTensor(self: SelfPtr, tensor: anytype) !void {
-            if(tensor.*.valueSize() != 0) {
+            if (tensor.*.valueSize() != 0) {
                 return AllocatorError.TensorHasAlloc;
-            }            
+            }
             tensor.values = try self.allocValues(tensor.valueCapacity());
         }
-        
+
         pub fn freeFromTensor(self: SelfPtr, tensor: anytype) !void {
             try self.freeValues(tensor.*.values);
-            tensor.values = &[_]ValueType{ };
+            tensor.values = &[_]ValueType{};
         }
 
-        pub fn allocTensor(
-            self: SelfPtr, 
-            comptime rank: usize,
-            comptime order: OrderType,
-            sizes: [rank]SizesType) !Tensor(ValueType, rank, order) {
-
+        pub fn allocTensor(self: SelfPtr, comptime rank: usize, comptime order: OrderType, sizes: [rank]SizesType) !Tensor(ValueType, rank, order) {
             const size = sliceProduct(SizesType, &sizes);
 
-            if(size == 0) {
+            if (size == 0) {
                 return AllocatorError.TensorSizeZero;
-            } 
-            var alloc = try self.allocValues(size);
-                        
-            return Tensor(ValueType, rank, order) {
+            }
+            const alloc = try self.allocValues(size);
+
+            return Tensor(ValueType, rank, order){
                 .values = alloc,
                 .sizes_and_strides = SizesAndStrides(rank, order).init(sizes),
             };
         }
 
         pub fn copyTensor(self: SelfPtr, tensor: anytype) !@TypeOf(tensor.*) {
-
             const T = @TypeOf(tensor.*);
-            
-            var alloc = try self.allocValues(tensor.valueSize());
+
+            const alloc = try self.allocValues(tensor.valueSize());
 
             @memcpy(alloc, tensor.values);
 
             return T{
-                .values = alloc, 
+                .values = alloc,
                 .sizes_and_strides = tensor.sizes_and_strides,
             };
         }
@@ -260,85 +235,70 @@ pub fn TensorFactory(comptime value_type: type) type {
         // Factory Math Functions ///
 
         pub fn add(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+            if (@TypeOf(x.*) != @TypeOf(y.*)) {
                 @compileError("Addition requires operands to be of the same type.");
             }
-            if(!x.isValid() or !y.isValid()){
+            if (!x.isValid() or !y.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            if(x.valueSize() != y.valueSize()){
+            if (x.valueSize() != y.valueSize()) {
                 return OpsError.UnequalSize;
             }
-            var z = try self.allocTensor(
-                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
-            );
-            Ops.addUnchecked(x, y, &z); 
+            var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
+            Ops.addUnchecked(x, y, &z);
             return z;
         }
 
         pub fn sub(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+            if (@TypeOf(x.*) != @TypeOf(y.*)) {
                 @compileError("Addition requires operands to be of the same type.");
             }
-            if(!x.isValid() or !y.isValid()){
+            if (!x.isValid() or !y.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            if(x.valueSize() != y.valueSize()){
+            if (x.valueSize() != y.valueSize()) {
                 return OpsError.UnequalSize;
             }
-            var z = try self.allocTensor(
-                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
-            );
-            Ops.subUnchecked(x, y, &z); 
+            var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
+            Ops.subUnchecked(x, y, &z);
             return z;
         }
 
         pub fn mul(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if(@TypeOf(x.*) != @TypeOf(y.*)) {
+            if (@TypeOf(x.*) != @TypeOf(y.*)) {
                 @compileError("Multipication requires operands to be of the same type.");
             }
-            if(!x.isValid() or !y.isValid()){
+            if (!x.isValid() or !y.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            if(x.valueSize() != y.valueSize()){
+            if (x.valueSize() != y.valueSize()) {
                 return OpsError.UnequalSize;
             }
-            var z = try self.allocTensor(
-                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
-            );
-            Ops.mulUnchecked(x, y, &z); 
+            var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
+            Ops.mulUnchecked(x, y, &z);
             return z;
         }
 
         pub fn bias(self: SelfPtr, x: anytype, b: @TypeOf(x.*).ValueType) !@TypeOf(x.*) {
-            if(!x.isValid()){
+            if (!x.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            var y = try self.allocTensor(
-                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
-            );
-            Ops.biasUnchecked(x, &y, b); 
+            var y = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
+            Ops.biasUnchecked(x, &y, b);
             return y;
         }
 
         pub fn scale(self: SelfPtr, x: anytype, s: @TypeOf(x.*).ValueType) !@TypeOf(x.*) {
-            if(!x.isValid()){
+            if (!x.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
-            var y = try self.allocTensor(
-                @TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes
-            );
-            Ops.scaleUnchecked(x, &y, s); 
+            var y = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
+            Ops.scaleUnchecked(x, &y, s);
             return y;
         }
 
-        pub fn contraction(
-            self: SelfPtr, 
-            comptime expression: [] const u8, 
-            x: anytype
-            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-
-            if(!x.isValid()) {
+        pub fn contraction(self: SelfPtr, comptime expression: []const u8, x: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+            if (!x.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
             const XRank = @TypeOf(x.*).Rank;
@@ -349,7 +309,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             var y_ss: [YRank]SizesType = undefined;
             {
                 var i: usize = 0;
-                while(i < YRank) : (i += 1) {
+                while (i < YRank) : (i += 1) {
                     y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
                 }
             }
@@ -357,23 +317,15 @@ pub fn TensorFactory(comptime value_type: type) type {
 
             var xc: [XRank]SizesType = undefined;
             var yc: [YRank]SizesType = undefined;
-            
+
             @memset(y.values, 0);
-            
-            @call(.always_inline, Ops.recursiveContraction, .{
-                ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc
-            });
+
+            @call(.always_inline, Ops.recursiveContraction, .{ ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc });
             return y;
         }
 
-        pub fn innerProduct(
-            self: SelfPtr, 
-            comptime expression: [] const u8, 
-            x: anytype,
-            y: anytype
-            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-
-            if(!x.isValid() or !y.isValid()) {
+        pub fn innerProduct(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+            if (!x.isValid() or !y.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
             const XRank = @TypeOf(x.*).Rank;
@@ -384,10 +336,10 @@ pub fn TensorFactory(comptime value_type: type) type {
             var z_sizes: [ZRank]SizesType = undefined;
             {
                 var i: usize = 0;
-                while(i < plan.total) : (i += 1) {
-                    if(plan.z_perm[i] == plan.pass) {
+                while (i < plan.total) : (i += 1) {
+                    if (plan.z_perm[i] == plan.pass) {
                         continue;
-                    } else if(plan.s_ctrl[i] == 0){
+                    } else if (plan.s_ctrl[i] == 0) {
                         z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
                     } else {
                         z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
@@ -399,25 +351,16 @@ pub fn TensorFactory(comptime value_type: type) type {
             var x_i: [XRank]SizesType = undefined;
             var y_i: [YRank]SizesType = undefined;
             var z_i: [ZRank]SizesType = undefined;
-            
+
             // TODO: Refactor - this is the only thing that differs from linear.
             @memset(z.values, 0);
-            
-            @call(.always_inline, Ops.recursiveInnerProduct, .{
-                ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i
-            });
+
+            @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
             return z;
         }
 
-        pub fn linear(
-            self: SelfPtr, 
-            comptime expression: [] const u8, 
-            x: anytype,
-            y: anytype,
-            b: anytype
-            ) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-
-            if(!x.isValid() or !y.isValid()) {
+        pub fn linear(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype, b: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+            if (!x.isValid() or !y.isValid()) {
                 return TensorError.InvalidTensorLayout;
             }
             const XRank = @TypeOf(x.*).Rank;
@@ -428,10 +371,10 @@ pub fn TensorFactory(comptime value_type: type) type {
             var z_sizes: [ZRank]SizesType = undefined;
             {
                 var i: usize = 0;
-                while(i < plan.total) : (i += 1) {
-                    if(plan.z_perm[i] == plan.pass) {
+                while (i < plan.total) : (i += 1) {
+                    if (plan.z_perm[i] == plan.pass) {
                         continue;
-                    } else if(plan.s_ctrl[i] == 0){
+                    } else if (plan.s_ctrl[i] == 0) {
                         z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
                     } else {
                         z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
@@ -445,17 +388,14 @@ pub fn TensorFactory(comptime value_type: type) type {
 
             // TODO: Refactor - this is the only thing that differs from innerProduct
             var z = self.copyTensor(b);
-            
-            @call(.always_inline, Ops.recursiveInnerProduct, .{
-                ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i
-            });
+
+            @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
             return z;
         }
     };
 }
 
 test "Allocate and Free" {
-
     const expect = std.testing.expect;
 
     // null uses the general purpose allocator.
@@ -488,7 +428,7 @@ test "Allocate and Free" {
     }
 
     factory.tracking(.start); // beging tracking allocations
-    
+
     ///////////////////////////////////////
     { // assign directly to tensor //////////
         var X = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
@@ -504,16 +444,16 @@ test "Allocate and Free" {
         // tensor slice should be reset
         try expect(X.valueSize() == 0);
     }
-    
+
     // make 3 tensors and do not free them
     var X = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
     var Y = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
     var Z = try factory.allocTensor(2, Rowwise, .{ 10, 10 });
 
     // trivial operation to avoid compile error
-    X.setValue(3, .{0, 1});
-    Y.setValue(3, .{0, 1});
-    Z.setValue(3, .{0, 1});
+    X.setValue(3, .{ 0, 1 });
+    Y.setValue(3, .{ 0, 1 });
+    Z.setValue(3, .{ 0, 1 });
 
     // factory will free X Y Z automatically
     // and this will panic if test fails
@@ -521,13 +461,12 @@ test "Allocate and Free" {
 }
 
 test "vectorized reduce" {
-
     var factory = TensorFactory(i32).init(null);
 
     factory.tracking(.start);
-    
+
     var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
-    
+
     @memset(x.values, 1);
 
     { // reduce sum of 10'000 elements
@@ -539,12 +478,12 @@ test "vectorized reduce" {
         try std.testing.expectEqual(y, 1);
     }
     { // reduce max of 10'000 elements
-        x.setValue(999, .{24, 62});
+        x.setValue(999, .{ 24, 62 });
         const y = try Ops.max(&x);
         try std.testing.expectEqual(y, 999);
     }
     { // reduce max of 10'000 elements
-        x.setValue(-999, .{92, 10});
+        x.setValue(-999, .{ 92, 10 });
         const y = try Ops.min(&x);
         try std.testing.expectEqual(y, -999);
     }
@@ -552,7 +491,6 @@ test "vectorized reduce" {
 }
 
 test "contraction" {
-
     var factory = TensorFactory(i32).init(null);
 
     factory.tracking(.start);
@@ -561,13 +499,13 @@ test "contraction" {
 
     @memset(x.values, 1);
 
-    var y = try factory.contraction("ijk->i", &x);
+    const y = try factory.contraction("ijk->i", &x);
 
     try std.testing.expectEqual(y.values[0], 12);
     try std.testing.expectEqual(y.values[1], 12);
     try std.testing.expectEqual(y.values[2], 12);
 
-    var z = try factory.contraction("ijk->j", &x);
+    const z = try factory.contraction("ijk->j", &x);
 
     try std.testing.expectEqual(z.values[0], 9);
     try std.testing.expectEqual(z.values[1], 9);
@@ -576,7 +514,6 @@ test "contraction" {
 
     factory.deinit();
 }
-
 
 test "contraction 2" {
     var factory = TensorFactory(i32).init(null);
@@ -638,7 +575,6 @@ test "contraction 2" {
 }
 
 test "inner product 1" {
-
     var factory = TensorFactory(i32).init(null);
 
     factory.tracking(.start);
@@ -668,7 +604,6 @@ test "inner product 1" {
 }
 
 test "inner product 2" {
-
     var factory = TensorFactory(i32).init(null);
 
     factory.tracking(.start);
@@ -681,17 +616,17 @@ test "inner product 2" {
     Ops.fill(&x, 0, 1);
     Ops.fill(&y, 0, 1);
 
-    var z = try factory.innerProduct("ijk,kjm->im", &x, &y);
+    const z = try factory.innerProduct("ijk,kjm->im", &x, &y);
 
     try std.testing.expectEqual(z.values[0], 100);
     try std.testing.expectEqual(z.values[1], 115);
     try std.testing.expectEqual(z.values[2], 280);
     try std.testing.expectEqual(z.values[3], 331);
 
-    var w = try factory.innerProduct("ikj,jkl->kl", &x, &y);
+    const w = try factory.innerProduct("ikj,jkl->kl", &x, &y);
 
-    try std.testing.expectEqual(w.values[0],  48);
-    try std.testing.expectEqual(w.values[1],  62);
+    try std.testing.expectEqual(w.values[0], 48);
+    try std.testing.expectEqual(w.values[1], 62);
     try std.testing.expectEqual(w.values[2], 116);
     try std.testing.expectEqual(w.values[3], 138);
     try std.testing.expectEqual(w.values[4], 216);
@@ -699,15 +634,14 @@ test "inner product 2" {
 }
 
 test "arithmetic 1" {
-
     var factory = TensorFactory(i64).init(null);
 
     factory.tracking(.start);
 
     defer factory.deinit();
 
-    var x = try factory.allocTensor(1, Rowwise, .{ 100_000 });
-    var y = try factory.allocTensor(1, Rowwise, .{ 100_000 });
+    var x = try factory.allocTensor(1, Rowwise, .{100_000});
+    var y = try factory.allocTensor(1, Rowwise, .{100_000});
     Ops.fill(&x, 1, 0);
     Ops.fill(&y, 2, 0);
 
@@ -728,19 +662,19 @@ test "arithmetic 1" {
         try std.testing.expect(s == -100_000);
     }
     {
-        var b: i64 = 4;
+        const b: i64 = 4;
         var z = try factory.bias(&x, b);
         const s = try Ops.sum(&z);
         try std.testing.expect(s == 500_000);
     }
     {
-        var b: i64 = 4;
+        const b: i64 = 4;
         var z = try factory.scale(&x, b);
         const s = try Ops.sum(&z);
         try std.testing.expect(s == 400_000);
     }
 
-    var z = try factory.allocTensor(1, Rowwise, .{ 100_000 });
+    var z = try factory.allocTensor(1, Rowwise, .{100_000});
 
     // free versions...
     {
@@ -759,13 +693,13 @@ test "arithmetic 1" {
         try std.testing.expect(s == -100_000);
     }
     {
-        var b: i64 = 4;
+        const b: i64 = 4;
         try Ops.bias(&x, &z, b);
         const s = try Ops.sum(&z);
         try std.testing.expect(s == 500_000);
     }
     {
-        var b: i64 = 4;
+        const b: i64 = 4;
         try Ops.scale(&x, &z, b);
         const s = try Ops.sum(&z);
         try std.testing.expect(s == 400_000);

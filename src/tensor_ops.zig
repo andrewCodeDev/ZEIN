@@ -1,4 +1,3 @@
-
 // DESIGN PHILOSOPHY June 6th, 2023 //
 
 // The goal for V1 is simple. Provide reliable (albeit naive) functionality
@@ -7,56 +6,44 @@
 // for correctness. As such, the current goal is to provide a complete set
 // of functionalities and replace them with more optimal solutions over time.
 
-
-const Tensor = @import("Tensor.zig").Tensor;
-const TensorError = @import("Tensor.zig").TensorError;
-const Rowwise = @import("SizesAndStrides.zig").Rowwise;
-const Colwise = @import("SizesAndStrides.zig").Colwise;
-const SizeAndStrideType = @import("SizesAndStrides.zig").SizeAndStride.ValueType;
-var GPA = @import("TensorFactory.zig");
+const Tensor = @import("./tensor.zig").Tensor;
+const TensorError = @import("./tensor.zig").TensorError;
+const Rowwise = @import("./sizes_and_strides.zig").Rowwise;
+const Colwise = @import("./sizes_and_strides.zig").Colwise;
+const SizeAndStrideType = @import("./sizes_and_strides.zig").SizeAndStride.ValueType;
+var GPA = @import("./tensor_factory.zig");
 const ReduceOp = @import("std").builtin.ReduceOp;
 const math = @import("std").math;
 
-pub const InnerProductPlan = @import("ExpressionParsing.zig").InnerProductPlan;
-pub const defaultPermuation = @import("SizesAndStrides.zig").defaultPermutation;
-pub const contractionParse = @import("ExpressionParsing.zig").contractionParse;
-pub const innerProductParse = @import("ExpressionParsing.zig").innerProductParse;
-pub const outerProductParse = @import("ExpressionParsing.zig").outerProductParse;
-pub const computeTensorIndex = @import("Tensor.zig").computeTensorIndex;
+pub const InnerProductPlan = @import("./expression_parsing.zig").InnerProductPlan;
+pub const defaultPermuation = @import("./sizes_and_strides.zig").defaultPermutation;
+pub const contractionParse = @import("./expression_parsing.zig").contractionParse;
+pub const innerProductParse = @import("./expression_parsing.zig").innerProductParse;
+pub const outerProductParse = @import("./expression_parsing.zig").outerProductParse;
+pub const computeTensorIndex = @import("./tensor.zig").computeTensorIndex;
 
-pub const OpsError = error {
-    UnequalSize,
-    InvalidDimensions,
-    InvalidSizes,
-    SizeZeroTensor,
-    IntegerOverflow
-};
+pub const OpsError = error{ UnequalSize, InvalidDimensions, InvalidSizes, SizeZeroTensor, IntegerOverflow };
 
 inline fn reduceInit(comptime op: ReduceOp, comptime T: type) T {
-
     const c = @typeName(T)[0];
 
-    if(op == ReduceOp.Add) {
+    if (op == ReduceOp.Add) {
         return 0; // implicit cast
-    }
-    else if(op == ReduceOp.Mul) {
+    } else if (op == ReduceOp.Mul) {
         return 1; // implicit cast
-    }
-    else if(op == ReduceOp.Min) {
-        if(c == 102) { // "f"
+    } else if (op == ReduceOp.Min) {
+        if (c == 102) { // "f"
             return math.floatMax(T);
         } else {
             return math.maxInt(T);
         }
-    }
-    else if(op == ReduceOp.Max) {
-        if(c == 102) { // "f"
+    } else if (op == ReduceOp.Max) {
+        if (c == 102) { // "f"
             return -math.floatMax(T);
         } else {
             return math.minInt(T);
         }
-    }
-    else {
+    } else {
         @compileError("Unknown Operation type for initial value.");
     }
 }
@@ -80,33 +67,33 @@ inline fn reduceInit(comptime op: ReduceOp, comptime T: type) T {
 // I'm going to just return an error because at least then, you don't have to
 // follow all of these with some if statement to make sure they didn't return
 // garbage values. Also, like with the case of sum, you can make an argument
-// that it can't fail but then you have to know which ones return errors 
+// that it can't fail but then you have to know which ones return errors
 // and which ones don't... I'm choosing consistency.
 
 pub fn sum(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
+    if (x.valueSize() > 0) {
         return reduceDispatch(ReduceOp.Add, addGeneric, x, reduceInit(ReduceOp.Add, @TypeOf(x.*).ValueType));
     } else {
-         return OpsError.SizeZeroTensor;
+        return OpsError.SizeZeroTensor;
     }
 }
 pub fn product(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
+    if (x.valueSize() > 0) {
         return reduceDispatch(ReduceOp.Mul, mulGeneric, x, reduceInit(ReduceOp.Mul, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn min(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
+    if (x.valueSize() > 0) {
         return reduceDispatch(ReduceOp.Min, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
 }
 pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
-       return reduceDispatch(ReduceOp.Max, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
+    if (x.valueSize() > 0) {
+        return reduceDispatch(ReduceOp.Max, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
@@ -114,10 +101,8 @@ pub fn max(x: anytype) !@TypeOf(x.*).ValueType {
 
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absmax(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
-       return mapReduceDispatch(
-            ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType)
-       );
+    if (x.valueSize() > 0) {
+        return mapReduceDispatch(ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
@@ -125,10 +110,8 @@ pub fn absmax(x: anytype) !@TypeOf(x.*).ValueType {
 
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absmin(x: anytype) !@TypeOf(x.*).ValueType {
-    if(x.valueSize() > 0) {
-       return mapReduceDispatch(
-            ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType)
-       );
+    if (x.valueSize() > 0) {
+        return mapReduceDispatch(ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType));
     } else {
         return OpsError.SizeZeroTensor;
     }
@@ -136,16 +119,12 @@ pub fn absmin(x: anytype) !@TypeOf(x.*).ValueType {
 
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absmaxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return mapReduceDispatch(
-         ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType)
-    );
+    return mapReduceDispatch(ReduceOp.Max, absGenericUnchecked, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
 }
 
 // TODO: Address the issue with checked vs unchecked absGeneric at call sight
 pub fn absminUnchecked(x: anytype) @TypeOf(x.*).ValueType {
-    return mapReduceDispatch(
-         ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType)
-    );
+    return mapReduceDispatch(ReduceOp.Min, absGenericUnchecked, minGeneric, x, reduceInit(ReduceOp.Min, @TypeOf(x.*).ValueType));
 }
 // To complete the set, for those who like to live dangerously... the unchecked versions.
 
@@ -162,13 +141,9 @@ pub fn maxUnchecked(x: anytype) @TypeOf(x.*).ValueType {
     return reduceDispatch(ReduceOp.Max, maxGeneric, x, reduceInit(ReduceOp.Max, @TypeOf(x.*).ValueType));
 }
 
-pub fn fill(
-    x: anytype, 
-    init: @TypeOf(x.*).ValueType,
-    step: @TypeOf(x.*).ValueType
-    ) void {
+pub fn fill(x: anytype, init: @TypeOf(x.*).ValueType, step: @TypeOf(x.*).ValueType) void {
     var incr = init;
-    for(x.values) |*value| {
+    for (x.values) |*value| {
         value.* = incr;
         incr += step;
     }
@@ -178,20 +153,20 @@ pub fn fill(
 ///////// BINARY ARITHMETIC FUNCTIONS ////////////////////////
 
 pub fn add(x: anytype, y: anytype, z: anytype) !void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+    if (!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+    if (x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
         return OpsError.UnequalSize;
     }
     arithmeticDispatch(addGeneric, x, y, z);
 }
 
 pub fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
     arithmeticDispatch(addGeneric, x, y, z);
@@ -200,20 +175,20 @@ pub fn addUnchecked(x: anytype, y: anytype, z: anytype) void {
 // <>--------------------------------------------------------<>
 
 pub fn sub(x: anytype, y: anytype, z: anytype) !void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+    if (!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+    if (x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
         return OpsError.UnequalSize;
     }
     arithmeticDispatch(subGeneric, x, y, z);
 }
 
 pub fn subUnchecked(x: anytype, y: anytype, z: anytype) void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
     arithmeticDispatch(subGeneric, x, y, z);
@@ -222,20 +197,20 @@ pub fn subUnchecked(x: anytype, y: anytype, z: anytype) void {
 // <>--------------------------------------------------------<>
 
 pub fn mul(x: anytype, y: anytype, z: anytype) !void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+    if (!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    if(x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
+    if (x.valueSize() != y.valueSize() or y.valueSize() != z.valueSize()) {
         return OpsError.UnequalSize;
     }
     arithmeticDispatch(mulGeneric, x, y, z);
 }
 
 pub fn mulUnchecked(x: anytype, y: anytype, z: anytype) void {
-    if(@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
+    if (@TypeOf(x) != @TypeOf(y) or @TypeOf(y) != @TypeOf(z)) {
         @compileError("Mismatched tensor types for addition.");
     }
     arithmeticDispatch(mulGeneric, x, y, z);
@@ -244,10 +219,10 @@ pub fn mulUnchecked(x: anytype, y: anytype, z: anytype) void {
 // <>--------------------------------------------------------<>
 
 pub fn scale(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid() or !y.isValid()) {
+    if (!x.isValid() or !y.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    if(x.valueSize() != y.valueSize()) {
+    if (x.valueSize() != y.valueSize()) {
         return OpsError.UnequalSize;
     }
     scalarBroadcastDispatch(mulGeneric, x, y, s);
@@ -260,10 +235,10 @@ pub fn scaleUnchecked(x: anytype, y: @TypeOf(x), s: @TypeOf(x.*).ValueType) void
 // <>--------------------------------------------------------<>
 
 pub fn bias(x: anytype, y: @TypeOf(x), b: @TypeOf(x.*).ValueType) !void {
-    if(!x.isValid() or !y.isValid()) {
+    if (!x.isValid() or !y.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
-    if(x.valueSize() != y.valueSize()) {
+    if (x.valueSize() != y.valueSize()) {
         return OpsError.UnequalSize;
     }
     scalarBroadcastDispatch(addGeneric, x, y, b);
@@ -281,16 +256,15 @@ inline fn quantizeGeneric(comptime int: type, x: anytype) int {
 pub fn quantize(x: anytype, y: anytype) @TypeOf(x.*).ValueType {
     const m = absmaxUnchecked(x);
 
-    if(m > 1.0) {
+    if (m > 1.0) {
         const s = 1.0 / m;
         var i: usize = 0;
-        while(i < x.values.len) : (i += 1) {
+        while (i < x.values.len) : (i += 1) {
             y.values[i] = quantizeGeneric(@TypeOf(y.*).ValueType, x.values[i] * s);
         }
-    }
-    else {
+    } else {
         var i: usize = 0;
-        while(i < 100) : (i += 1) {
+        while (i < 100) : (i += 1) {
             y.values[i] = quantizeGeneric(@TypeOf(y.*).ValueType, x.values[i]);
         }
     }
@@ -305,16 +279,15 @@ inline fn unquantizeGeneric(comptime float: type, x: anytype) float {
 
 pub fn unquantize(x: anytype, y: anytype, s: @TypeOf(y.*).ValueType) void {
     const FT = @TypeOf(y.*).ValueType;
-    
-    if(s > 1.0) {
+
+    if (s > 1.0) {
         var i: usize = 0;
-        while(i < x.values.len) : (i += 1) {
+        while (i < x.values.len) : (i += 1) {
             y.values[i] = s * unquantizeGeneric(FT, x.values[i]);
         }
-    }
-    else {
+    } else {
         var i: usize = 0;
-        while(i < 100) : (i += 1) {
+        while (i < 100) : (i += 1) {
             y.values[i] = unquantizeGeneric(FT, x.values[i]);
         }
     }
@@ -345,35 +318,31 @@ pub inline fn recursivePermutate(
     x: anytype, // source tensor
     y: []VT, // destination memory
     c: *[R]IT, // index container
-    n: *IT // scratch counter
+    n: *IT, // scratch counter
 ) void {
-
-    if(I == (R - 1)) {     
+    if (I == (R - 1)) {
         // we only need to make this once really...
-        const x_ss : @Vector(R, IT) = x.*.sizes_and_strides.strides;
+        const x_ss: @Vector(R, IT) = x.*.sizes_and_strides.strides;
 
         var i: IT = 0;
         var n_i = n.*;
-        while(i < x.*.getSize(I)) : ({ i += 1; n_i += 1; }) {
-
+        while (i < x.*.getSize(I)) : ({
+            i += 1;
+            n_i += 1;
+        }) {
             c[I] = i;
-            const x_c : @Vector(R, IT) = c.*;
+            const x_c: @Vector(R, IT) = c.*;
             const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
 
             y[n_i] = x.*.values[x_i];
         }
         n.* += i;
-    }
-
-    else {
+    } else {
         var i: IT = 0;
-        while(i < x.*.getSize(I)) : (i += 1) {
-            
-            c[I] = i; 
-            
-            @call(.always_inline, recursivePermutate, .{
-                 VT, IT, R, (I + 1), x, y, c, n 
-            });
+        while (i < x.*.getSize(I)) : (i += 1) {
+            c[I] = i;
+
+            @call(.always_inline, recursivePermutate, .{ VT, IT, R, (I + 1), x, y, c, n });
         }
     }
 }
@@ -396,9 +365,8 @@ pub inline fn recursivePermutate(
 //                    x_indices[I] = n;
 //                    y[y_indices] += x.getValue(x_indices);
 
-pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !void {
-
-    if(!x.isValid() or !y.isValid()) {
+pub fn contraction(comptime expression: []const u8, x: anytype, y: anytype) !void {
+    if (!x.isValid() or !y.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
 
@@ -409,36 +377,31 @@ pub fn contraction(comptime expression: [] const u8, x: anytype, y: anytype) !vo
     const xs = x.getSizes();
     const ys = y.getSizes();
 
-    var i: usize = 1; 
-    while(i < YT.Rank) : (i += 1) {
-        if(xs[ip.lhs[i]] != ys[ip.rhs[i]]) {
+    var i: usize = 1;
+    while (i < YT.Rank) : (i += 1) {
+        if (xs[ip.lhs[i]] != ys[ip.rhs[i]]) {
             return OpsError.InvalidSizes;
         }
     }
     var xc: [XT.Rank]XT.SizesType = undefined;
     var yc: [YT.Rank]YT.SizesType = undefined;
-    
+
     @memset(y.values, 0);
-    
-    @call(.always_inline, recursiveContraction, .{
-        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc
-    });
+
+    @call(.always_inline, recursiveContraction, .{ XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc });
 }
 
-pub fn contractionUnchecked(comptime expression: [] const u8, x: anytype, y: anytype) !void {
-
+pub fn contractionUnchecked(comptime expression: []const u8, x: anytype, y: anytype) !void {
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ip = contractionParse(XT.Rank, YT.Rank, expression);
 
     var xc: [XT.Rank]XT.SizesType = undefined;
     var yc: [YT.Rank]YT.SizesType = undefined;
-    
+
     @memset(y.values, 0);
-    
-    @call(.always_inline, recursiveContraction, .{
-        XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc
-    });
+
+    @call(.always_inline, recursiveContraction, .{ XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc });
 }
 
 pub inline fn recursiveContraction(
@@ -454,70 +417,58 @@ pub inline fn recursiveContraction(
     xc: *[XR]IT, // index container
     yc: *[YR]IT, // index container
 ) void {
-
-    if(XR <= YR) {
+    if (XR <= YR) {
         @compileError("Contraction must go from a larger tensor to a smaller one.");
     }
 
-    if(I < YR) {
-
+    if (I < YR) {
         const x_perm_index = xp[I];
         const y_perm_index = yp[I];
 
         // this first branch loads up the x and y indices
         // and passes them to the next loop. In this case,
         // I is still in bounds of both x and y ranks.
-        
-        var i: IT = 0;
-        while(i < x.getSize(x_perm_index)) : (i += 1) {
-            
-            xc[x_perm_index] = i; 
-            yc[y_perm_index] = i; 
-            
-            @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc
-            });
-        }
-    }
 
-    else if ((YR <= I) and (I < (XR - 1))) {
+        var i: IT = 0;
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
+            yc[y_perm_index] = i;
+
+            @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
+        }
+    } else if ((YR <= I) and (I < (XR - 1))) {
 
         // the second branch deals with values of I that are
         // out-of-bounds for y rank, but still in-bounds for
         // the x rank.
 
         const x_perm_index = xp[I];
-        
-        var i: IT = 0;
-        while(i < x.getSize(x_perm_index)) : (i += 1) {
-            
-            xc[x_perm_index] = i; 
-            
-            @call(.always_inline, recursiveContraction, .{
-                 VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc
-            });
-        }
-    }
 
-    else {
+        var i: IT = 0;
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
+
+            @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
+        }
+    } else {
 
         // the third branch deals with summing up the contracted
         // indices and writing them to the related y index
-        
-        const x_ss : @Vector(XR, IT) = x.*.sizes_and_strides.strides;
+
+        const x_ss: @Vector(XR, IT) = x.*.sizes_and_strides.strides;
 
         const x_perm_index = xp[I];
 
         var i: IT = 0;
         var t: VT = 0;
-        while(i < x.getSize(x_perm_index)) : (i += 1) {
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
             xc[x_perm_index] = i;
-            const x_c : @Vector(XR, IT) = xc.*;
+            const x_c: @Vector(XR, IT) = xc.*;
             const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
             t += x.values[x_i]; // accumulate summations
         }
-        const y_ss : @Vector(YR, IT) = y.sizes_and_strides.strides;
-        const y_c : @Vector(YR, IT) = yc.*;
+        const y_ss: @Vector(YR, IT) = y.sizes_and_strides.strides;
+        const y_c: @Vector(YR, IT) = yc.*;
         const y_i = @reduce(ReduceOp.Add, y_c * y_ss);
         y.*.values[y_i] += t;
     }
@@ -527,51 +478,36 @@ pub inline fn recursiveContraction(
 
 // TODO: Add explanation for this crazy thing...
 
-pub fn innerProduct(
-    comptime expression: [] const u8,
-    x: anytype,
-    y: anytype,
-    z: anytype) !void {
-
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+pub fn innerProduct(comptime expression: []const u8, x: anytype, y: anytype, z: anytype) !void {
+    if (!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    const plan = comptime innerProductParse(
-        XT.Rank, YT.Rank, ZT.Rank, expression
-    );
+    const plan = comptime innerProductParse(XT.Rank, YT.Rank, ZT.Rank, expression);
 
-    for(0..plan.total) |i| {
-        if(plan.x_perm[i] != plan.pass and plan.y_perm[i] != plan.pass) {
-            if(x.getSize(plan.x_perm[i]) != y.getSize(plan.y_perm[i])) {
+    for (0..plan.total) |i| {
+        if (plan.x_perm[i] != plan.pass and plan.y_perm[i] != plan.pass) {
+            if (x.getSize(plan.x_perm[i]) != y.getSize(plan.y_perm[i])) {
                 return OpsError.InvalidDimensions;
             }
         }
-    // TODO: Add a check for output dimensions...
+        // TODO: Add a check for output dimensions...
     }
 
     var x_i: [XT.Rank]XT.SizesType = undefined;
     var y_i: [YT.Rank]YT.SizesType = undefined;
     var z_i: [ZT.Rank]ZT.SizesType = undefined;
-    
+
     @memset(z.values, 0);
-    
-    @call(.always_inline, recursiveInnerProduct, .{
-        XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i 
-    });
+
+    @call(.always_inline, recursiveInnerProduct, .{ XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i });
 }
 
-pub inline fn sizeSelector(
-    comptime x_index: usize,
-    comptime y_index: usize,
-    comptime select: usize,
-    x: anytype,
-    y: anytype
-) usize {
-    if(select == 0) {
+pub inline fn sizeSelector(comptime x_index: usize, comptime y_index: usize, comptime select: usize, x: anytype, y: anytype) usize {
+    if (select == 0) {
         return x.getSize(x_index);
     } else {
         return y.getSize(y_index);
@@ -590,33 +526,38 @@ pub inline fn recursiveInnerProduct(
     yc: *[@TypeOf(y.*).Rank]IT, // index container
     zc: *[@TypeOf(z.*).Rank]IT, // index container
 ) void {
-
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    const size = @call(.always_inline, sizeSelector,
-        .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y }
-    );
+    const size = @call(.always_inline, sizeSelector, .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y });
 
-    if(I < (plan.total - 1)) {
+    if (I < (plan.total - 1)) {
         var i: IT = 0;
-        while(i < size) : (i += 1) {
-            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
-            if(comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
-            @call(.always_inline, recursiveInnerProduct, .{
-                 VT, IT, (I + 1), plan, x, y, z, xc, yc, zc
-            });
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
+            if (comptime plan.z_perm[I] != plan.pass) {
+                zc[plan.z_perm[I]] = i;
+            }
+            @call(.always_inline, recursiveInnerProduct, .{ VT, IT, (I + 1), plan, x, y, z, xc, yc, zc });
         }
-    }
-
-    else {
+    } else {
         var i: IT = 0;
-        while(i < size) : (i += 1) {
-            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
-            if(comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
+            if (comptime plan.z_perm[I] != plan.pass) {
+                zc[plan.z_perm[I]] = i;
+            }
             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
             const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
@@ -629,39 +570,30 @@ pub inline fn recursiveInnerProduct(
 
 // TODO: Add explanation for this crazy thing...
 
-pub fn outerProduct(
-    comptime expression: [] const u8,
-    x: anytype,
-    y: anytype,
-    z: anytype) !void {
-
-    if(!x.isValid() or !y.isValid() or !z.isValid()) {
+pub fn outerProduct(comptime expression: []const u8, x: anytype, y: anytype, z: anytype) !void {
+    if (!x.isValid() or !y.isValid() or !z.isValid()) {
         return TensorError.InvalidTensorLayout;
     }
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    const plan = comptime outerProductParse(
-        XT.Rank, YT.Rank, ZT.Rank, expression
-    );
+    const plan = comptime outerProductParse(XT.Rank, YT.Rank, ZT.Rank, expression);
 
-    for(plan.x_perm, plan.y_perm, plan.z_perm) |xp, yp, zp| {
-        if(xp != plan.pass and x.getSize(xp) != z.getSize(zp))
+    for (plan.x_perm, plan.y_perm, plan.z_perm) |xp, yp, zp| {
+        if (xp != plan.pass and x.getSize(xp) != z.getSize(zp))
             return OpsError.InvalidDimensions;
-        if(yp != plan.pass and y.getSize(yp) != z.getSize(zp))
+        if (yp != plan.pass and y.getSize(yp) != z.getSize(zp))
             return OpsError.InvalidDimensions;
     }
 
     var x_i: [XT.Rank]XT.SizesType = undefined;
     var y_i: [YT.Rank]YT.SizesType = undefined;
     var z_i: [ZT.Rank]ZT.SizesType = undefined;
-    
+
     @memset(z.values, 0);
-    
-    @call(.always_inline, recursiveInnerProduct, .{
-        XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i 
-    });
+
+    @call(.always_inline, recursiveInnerProduct, .{ XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i });
 }
 
 pub inline fn recursiveOuterProduct(
@@ -676,32 +608,33 @@ pub inline fn recursiveOuterProduct(
     yc: *[@TypeOf(y.*).Rank]IT, // index container
     zc: *[@TypeOf(z.*).Rank]IT, // index container
 ) void {
-
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    const size = @call(.always_inline, sizeSelector,
-        .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y }
-    );
+    const size = @call(.always_inline, sizeSelector, .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y });
 
-    if(I < (plan.total - 1)) {
+    if (I < (plan.total - 1)) {
         var i: IT = 0;
-        while(i < size) : (i += 1) {
-            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
             zc[plan.z_perm[I]] = i;
-            @call(.always_inline, recursiveInnerProduct, .{
-                 VT, IT, (I + 1), plan, x, y, z, xc, yc, zc
-            });
+            @call(.always_inline, recursiveInnerProduct, .{ VT, IT, (I + 1), plan, x, y, z, xc, yc, zc });
         }
-    }
-
-    else {
+    } else {
         var i: IT = 0;
-        while(i < size) : (i += 1) {
-            if(comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if(comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
             zc[plan.z_perm[I]] = i;
             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
@@ -713,63 +646,43 @@ pub inline fn recursiveOuterProduct(
 
 // <>--------------------------------------------------------<>
 
-fn loopReduce(
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-    ) @TypeOf(x.*).ValueType {
+fn loopReduce(comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     var i: usize = 0;
     var rdx = init;
-    while(i < x.valueSize()) : (i += 1) {
+    while (i < x.valueSize()) : (i += 1) {
         rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
 
-fn vectorizedReduce(
-    comptime N: usize, 
-    comptime ReduceType: anytype, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-    ) @TypeOf(x.*).ValueType {
-
+fn vectorizedReduce(comptime N: usize, comptime ReduceType: anytype, comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     const T = @TypeOf(x.*).ValueType;
     var i: usize = 0;
     var rdx = init;
-    
+
     // reduce in size N chunks...
-    while((i + N) < x.valueSize()) : (i += N) {
-        const slice = x.values[i..N + i];
+    while ((i + N) < x.valueSize()) : (i += N) {
+        const slice = x.values[i .. N + i];
         const vec: @Vector(N, T) = slice[0..N].*; // needs compile time length
         rdx = @call(.always_inline, BinaryFunc, .{ rdx, @reduce(ReduceType, vec) });
     }
     // reduce remainder...
-    while(i < x.valueSize()) : (i += 1) {
+    while (i < x.valueSize()) : (i += 1) {
         rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
 
-fn reduceDispatch(    
-    comptime ReduceType: anytype, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-) @TypeOf(x.*).ValueType {
-
+fn reduceDispatch(comptime ReduceType: anytype, comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     const size = x.valueSize();
 
-    if(size < 128) {
+    if (size < 128) {
         return loopReduce(BinaryFunc, x, init);
-    }
-    else if(size < 256) {
+    } else if (size < 256) {
         return vectorizedReduce(128, ReduceType, BinaryFunc, x, init);
-    }
-    else if(size < 512) {
+    } else if (size < 512) {
         return vectorizedReduce(256, ReduceType, BinaryFunc, x, init);
-    }
-    else {
+    } else {
         return vectorizedReduce(512, ReduceType, BinaryFunc, x, init);
     }
 }
@@ -777,189 +690,149 @@ fn reduceDispatch(
 // <>--------------------------------------------------------<>
 
 fn loopArithmetic(
-    comptime BinaryFunc: anytype, 
+    comptime BinaryFunc: anytype,
     x: anytype,
     y: anytype,
     z: anytype,
-    ) void {
+) void {
     var i: usize = 0;
-    while(i < x.valueSize()) : (i += 1) {
+    while (i < x.valueSize()) : (i += 1) {
         z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
     }
 }
 
 fn vectorizedArithmetic(
-    comptime N: usize, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    y: anytype,
-    z: anytype,
-    ) void {
-    const T = @TypeOf(x.*).ValueType;
-    var i: usize = 0;
-    var j: usize = N;
-    var buffer: [N]T = undefined;
-    while(j <= x.values.len) : ({i += N; j += N; }) {
-        const xs = x.values[i..j];
-        const ys = y.values[i..j];
-        const v: @Vector(N, T) = xs[0..N].*;
-        const u: @Vector(N, T) = ys[0..N].*;
-        buffer = @call(.always_inline, BinaryFunc, .{v, u});
-        @memcpy(z.values[i..j], &buffer);
-    }
-    while(i < x.values.len) : (i += 1) {
-        z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
-    }
-}
-
-fn arithmeticDispatch(    
-    comptime BinaryFunc: anytype, 
+    comptime N: usize,
+    comptime BinaryFunc: anytype,
     x: anytype,
     y: anytype,
     z: anytype,
 ) void {
+    const T = @TypeOf(x.*).ValueType;
+    var i: usize = 0;
+    var j: usize = N;
+    var buffer: [N]T = undefined;
+    while (j <= x.values.len) : ({
+        i += N;
+        j += N;
+    }) {
+        const xs = x.values[i..j];
+        const ys = y.values[i..j];
+        const v: @Vector(N, T) = xs[0..N].*;
+        const u: @Vector(N, T) = ys[0..N].*;
+        buffer = @call(.always_inline, BinaryFunc, .{ v, u });
+        @memcpy(z.values[i..j], &buffer);
+    }
+    while (i < x.values.len) : (i += 1) {
+        z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
+    }
+}
 
+fn arithmeticDispatch(
+    comptime BinaryFunc: anytype,
+    x: anytype,
+    y: anytype,
+    z: anytype,
+) void {
     const size = x.valueSize();
 
-    if(size < 128) {
+    if (size < 128) {
         loopArithmetic(BinaryFunc, x, y, z);
-    }
-    else if(size < 256) {
+    } else if (size < 256) {
         vectorizedArithmetic(128, BinaryFunc, x, y, z);
-    }
-    else if(size < 512) {
+    } else if (size < 512) {
         vectorizedArithmetic(256, BinaryFunc, x, y, z);
-    }
-    else {
+    } else {
         vectorizedArithmetic(512, BinaryFunc, x, y, z);
     }
 }
 
 // <>--------------------------------------------------------<>
 
-fn loopMapReduce(
-    comptime UnaryFunc: anytype, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-    ) @TypeOf(x.*).ValueType {
+fn loopMapReduce(comptime UnaryFunc: anytype, comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     var i: usize = 0;
     var rdx = init;
-    while(i < x.valueSize()) : (i += 1) {
-        const u = @call(.always_inline, UnaryFunc, .{ x.values[i] });
-        rdx = @call(.always_inline, BinaryFunc, .{ rdx, u }); 
+    while (i < x.valueSize()) : (i += 1) {
+        const u = @call(.always_inline, UnaryFunc, .{x.values[i]});
+        rdx = @call(.always_inline, BinaryFunc, .{ rdx, u });
     }
     return rdx;
 }
 
-fn vectorizedMapReduce(
-    comptime N: usize, 
-    comptime ReduceType: anytype, 
-    comptime UnaryFunc: anytype, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-    ) @TypeOf(x.*).ValueType {
-
+fn vectorizedMapReduce(comptime N: usize, comptime ReduceType: anytype, comptime UnaryFunc: anytype, comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     const T = @TypeOf(x.*).ValueType;
     var i: usize = 0;
     var rdx = init;
-    
+
     // reduce in size N chunks...
-    while((i + N) < x.valueSize()) : (i += N) {
-        const slice = x.values[i..N + i];
-        var vec: @Vector(N, T) =  slice[0..N].*; // needs compile time length
-        vec = @call(.always_inline, UnaryFunc, .{ vec });
+    while ((i + N) < x.valueSize()) : (i += N) {
+        const slice = x.values[i .. N + i];
+        var vec: @Vector(N, T) = slice[0..N].*; // needs compile time length
+        vec = @call(.always_inline, UnaryFunc, .{vec});
         rdx = @call(.always_inline, BinaryFunc, .{ rdx, @reduce(ReduceType, vec) });
     }
     // reduce remainder...
-    while(i < x.valueSize()) : (i += 1) {
+    while (i < x.valueSize()) : (i += 1) {
         rdx = @call(.always_inline, BinaryFunc, .{ rdx, x.values[i] });
     }
     return rdx;
 }
 
-fn mapReduceDispatch(    
-    comptime ReduceType: anytype, 
-    comptime UnaryFunc: anytype,
-    comptime BinaryFunc: anytype,
-    x: anytype,
-    init: @TypeOf(x.*).ValueType
-) @TypeOf(x.*).ValueType {
-
+fn mapReduceDispatch(comptime ReduceType: anytype, comptime UnaryFunc: anytype, comptime BinaryFunc: anytype, x: anytype, init: @TypeOf(x.*).ValueType) @TypeOf(x.*).ValueType {
     const size = x.valueSize();
 
-    if(size < 128) {
+    if (size < 128) {
         return loopMapReduce(UnaryFunc, BinaryFunc, x, init);
-    }
-    else if(size < 256) {
+    } else if (size < 256) {
         return vectorizedMapReduce(128, ReduceType, UnaryFunc, BinaryFunc, x, init);
-    }
-    else if(size < 512) {
+    } else if (size < 512) {
         return vectorizedMapReduce(256, ReduceType, UnaryFunc, BinaryFunc, x, init);
-    }
-    else {
+    } else {
         return vectorizedMapReduce(512, ReduceType, UnaryFunc, BinaryFunc, x, init);
     }
 }
 
 // <>--------------------------------------------------------<>
 
-fn loopScalarBroadcast(
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    y: anytype,
-    s: @TypeOf(x.*).ValueType
-    ) void {
+fn loopScalarBroadcast(comptime BinaryFunc: anytype, x: anytype, y: anytype, s: @TypeOf(x.*).ValueType) void {
     var i: usize = 0;
-    while(i < x.values.len) : (i += 1) {
-        y.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], s }); 
+    while (i < x.values.len) : (i += 1) {
+        y.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], s });
     }
 }
 
-fn vectorizedScalarBroadcast(
-    comptime N: usize, 
-    comptime BinaryFunc: anytype, 
-    x: anytype,
-    y: anytype,
-    s: @TypeOf(x.*).ValueType
-    ) void {
+fn vectorizedScalarBroadcast(comptime N: usize, comptime BinaryFunc: anytype, x: anytype, y: anytype, s: @TypeOf(x.*).ValueType) void {
     const T = @TypeOf(x.*).ValueType;
     // broadcast in size N chunks...
     var i: usize = 0;
     var j: usize = N;
     const u: @Vector(N, T) = @splat(s);
     var buffer: [N]T = undefined;
-    while(j <= x.values.len) : ({i += N; j += N; }) {
+    while (j <= x.values.len) : ({
+        i += N;
+        j += N;
+    }) {
         const xs = x.values[i..j];
         const v: @Vector(N, T) = xs[0..N].*;
-        buffer = @call(.always_inline, BinaryFunc, .{v, u});
+        buffer = @call(.always_inline, BinaryFunc, .{ v, u });
         @memcpy(y.values[i..j], &buffer);
     }
     // broadcast remainder...
-    while(i < x.values.len) : (i += 1) {
+    while (i < x.values.len) : (i += 1) {
         y.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], s });
     }
 }
 
-fn scalarBroadcastDispatch(    
-    comptime BinaryFunc: anytype,
-    x: anytype,
-    y: anytype,
-    s: @TypeOf(x.*).ValueType
-) void {
+fn scalarBroadcastDispatch(comptime BinaryFunc: anytype, x: anytype, y: anytype, s: @TypeOf(x.*).ValueType) void {
     const size = x.valueSize();
 
-    if(size < 128) {
+    if (size < 128) {
         loopScalarBroadcast(BinaryFunc, x, y, s);
-    }
-    else if(size < 256) {
+    } else if (size < 256) {
         vectorizedScalarBroadcast(128, BinaryFunc, x, y, s);
-    }
-    else if(size < 512) {
+    } else if (size < 512) {
         vectorizedScalarBroadcast(256, BinaryFunc, x, y, s);
-    }
-    else {
+    } else {
         vectorizedScalarBroadcast(512, BinaryFunc, x, y, s);
     }
 }
@@ -991,39 +864,39 @@ pub inline fn absGenericUnchecked(x: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     return switch (comptime @typeInfo(T)) {
         .Float => {
-            return @fabs(x);
+            return @abs(x);
         },
         .Int => |info| {
-            if(comptime info.signedness == true) {
+            if (comptime info.signedness == true) {
                 const mask = x >> (comptime @bitSizeOf(@TypeOf(x)) - 1);
                 return (x + mask) ^ mask;
             } else {
-                return x;  
+                return x;
             }
         },
         .Vector => |info| {
-            return switch(comptime @typeInfo(info.child)) {
+            return switch (comptime @typeInfo(info.child)) {
                 .Float => {
-                    return @fabs(x);
+                    return @abs(x);
                 },
                 else => {
                     @compileError("Absolute value for integer vectors unimplemented.");
-                }
+                },
             };
         },
-        else => @compileError("Invalid type passed to absGeneric function: " ++ @typeName(T))
+        else => @compileError("Invalid type passed to absGeneric function: " ++ @typeName(T)),
     };
 }
 
-pub inline fn absGeneric(x: anytype) !@TypeOf(x) {    
+pub inline fn absGeneric(x: anytype) !@TypeOf(x) {
     const T = @TypeOf(x);
     return switch (comptime @typeInfo(T)) {
         .Int => |info| {
-            if(info.signedness) {
-                if(x == math.minInt(T)) return OpsError.IntegerOverflow;
+            if (info.signedness) {
+                if (x == math.minInt(T)) return OpsError.IntegerOverflow;
             }
-            return @call(.always_inline, absGenericUnchecked, .{ x });
+            return @call(.always_inline, absGenericUnchecked, .{x});
         },
-        else => @call(.always_inline, absGenericUnchecked, .{ x })
+        else => @call(.always_inline, absGenericUnchecked, .{x}),
     };
 }

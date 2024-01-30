@@ -1,0 +1,12 @@
+.{
+    .name = "ZEIN",
+    .version = "0.1.0",
+    .dependencies = .{
+        // dependencies should be installed with `zig fetch --save {path to archive}`
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
