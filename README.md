@@ -87,14 +87,6 @@ const d = try zein.min(&x);
 
 The main ZEIN/Zein.zig file provides an interface for the library implementation.
 
-The implementations are in the Core folder. They will be labled as "VX" where X is the version number.
-
-Most functions in the Zein library will have default and "unchecked" versions.
-
-Default functions ensure operational correctness while unchecked versions do not.
-
-Unchecked versions are provided for api-level optimizations where performance matters.
-
 ## Memory Ownership and Viewership
 
 Currently, tensor permutations only change the indexing of a tensor - they do not
