@@ -1,4 +1,3 @@
-
 ///////////////////////////////////////////////////////////////
 //// Motivation and Explanation for StackAllocator ////////////
 
@@ -21,9 +20,7 @@
 const std = @import("std");
 
 pub fn StackBuffer(comptime size: usize) type {
-
     return struct {
-
         const Self = @This();
         const Size = size;
 
@@ -32,7 +29,7 @@ pub fn StackBuffer(comptime size: usize) type {
 
         pub fn withdraw(self: *Self, n: usize) ?[]u8 {
             if ((n + self.used) <= self.items.len) {
-                var data = self.items[self.used..self.used + n];
+                const data = self.items[self.used .. self.used + n];
                 self.used += n;
                 return data;
             }
@@ -48,7 +45,7 @@ pub fn StackBuffer(comptime size: usize) type {
 
         pub inline fn isTop(self: *const Self, data: []u8) bool {
             // can only pop values off the top of the stack
-            if(self.used < data.len) {
+            if (self.used < data.len) {
                 return false;
             }
             // check to see if we can back up the values
@@ -57,7 +54,7 @@ pub fn StackBuffer(comptime size: usize) type {
 
         pub fn canResize(self: *const Self, data: []u8, n: usize) bool {
             // can only resize values at the top of the stack
-            if(!self.isTop(data)) {
+            if (!self.isTop(data)) {
                 return false;
             }
             const old_used = self.used - data.len;
@@ -66,25 +63,23 @@ pub fn StackBuffer(comptime size: usize) type {
         }
 
         pub fn deposit(self: *Self, data: []u8) bool {
-            if (!self.owns(data)){    
+            if (!self.owns(data)) {
                 return false;
             }
             // check to see if we can back up the values
-            if(self.isTop(data)) {
+            if (self.isTop(data)) {
                 self.used -= data.len;
             }
             return true;
         }
     };
-}    
+}
 
 ////////////////////////////////////////////////////////
 //////// StackAllocator Implementation /////////////////
 
 pub fn StackAllocator(comptime size: usize) type {
-
     return struct {
-    
         const Self = @This();
         const Size = size;
 
@@ -92,16 +87,16 @@ pub fn StackAllocator(comptime size: usize) type {
         backing_allocator: std.mem.Allocator,
 
         // TODO: Create a dummy mutex that can be swapped via policy
-        mutex: std.Thread.Mutex = std.Thread.Mutex{ },
+        mutex: std.Thread.Mutex = std.Thread.Mutex{},
 
         pub fn init(backing_allocator: std.mem.Allocator) Self {
-            return Self { 
+            return Self{
                 .backing_allocator = backing_allocator,
-                .stack_buffer = .{ },
+                .stack_buffer = .{},
             };
         }
 
-        pub fn allocator(self: *Self) std.mem.Allocator {        
+        pub fn allocator(self: *Self) std.mem.Allocator {
             return .{
                 .ptr = self,
                 .vtable = &.{
@@ -112,24 +107,19 @@ pub fn StackAllocator(comptime size: usize) type {
             };
         }
 
-        pub fn alloc(
-            ctx: *anyopaque,
-            len: usize,
-            log2_ptr_align: u8,
-            ret_addr: usize
-        ) ?[*]u8 {        
+        pub fn alloc(ctx: *anyopaque, len: usize, log2_ptr_align: u8, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ctx));
 
             self.mutex.lock();
 
             defer self.mutex.unlock();
 
-            if(self.stack_buffer.withdraw(len)) |data| {
+            if (self.stack_buffer.withdraw(len)) |data| {
                 return data.ptr;
             }
             return self.backing_allocator.rawAlloc(len, log2_ptr_align, ret_addr);
         }
-        
+
         pub fn resize(
             ctx: *anyopaque,
             old_mem: []u8,
@@ -148,7 +138,7 @@ pub fn StackAllocator(comptime size: usize) type {
             }
             return self.stack_buffer.canResize(old_mem, new_len);
         }
-         
+
         pub fn free(
             ctx: *anyopaque,
             old_mem: []u8,
@@ -174,27 +164,26 @@ pub fn StackAllocator(comptime size: usize) type {
 /////// StackAllocator Testing Section //////////////////
 
 test "basic stack properties" {
-
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
+    var GPA = std.heap.GeneralPurposeAllocator(.{}){};
     var stack_allocator = StackAllocator(100).init(GPA.allocator());
     var allocator = stack_allocator.allocator();
 
     { // reverse-order stack popping
-        var a = try allocator.alloc(u8, 10);
+        const a = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 10);
-        var b = try allocator.alloc(u8, 10);
+        const b = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 20);
 
         allocator.free(b);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 10);
         allocator.free(a);
-        try std.testing.expectEqual(stack_allocator.stack_buffer.used,  0);
+        try std.testing.expectEqual(stack_allocator.stack_buffer.used, 0);
     }
 
     { // unordered stack popping
-        var a = try allocator.alloc(u8, 10);
+        const a = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 10);
-        var b = try allocator.alloc(u8, 10);
+        const b = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 20);
 
         allocator.free(a);
@@ -207,15 +196,14 @@ test "basic stack properties" {
 }
 
 test "basic stack resize" {
-
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
+    var GPA = std.heap.GeneralPurposeAllocator(.{}){};
     var stack_allocator = StackAllocator(100).init(GPA.allocator());
     var allocator = stack_allocator.allocator();
 
     { // resize checking
-        var a = try allocator.alloc(u8, 10);
+        const a = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 10);
-        var b = try allocator.alloc(u8, 10);
+        const b = try allocator.alloc(u8, 10);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 20);
 
         // a cannot resize because it is not on the top of the stack
@@ -235,16 +223,15 @@ test "basic stack resize" {
 }
 
 test "stack-overflow allocation" {
-
-    var GPA = std.heap.GeneralPurposeAllocator(.{ }){ };
+    var GPA = std.heap.GeneralPurposeAllocator(.{}){};
     var stack_allocator = StackAllocator(100).init(GPA.allocator());
     var allocator = stack_allocator.allocator();
 
     { // overflow the full memory stack
-        var a = try allocator.alloc(u8, 100);
+        const a = try allocator.alloc(u8, 100);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 100);
 
-        var b = try allocator.alloc(u8, 100);
+        const b = try allocator.alloc(u8, 100);
         try std.testing.expectEqual(stack_allocator.stack_buffer.used, 100);
 
         allocator.free(a);

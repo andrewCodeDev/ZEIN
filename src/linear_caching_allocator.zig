@@ -1,4 +1,3 @@
-
 ///////////////////////////////////////////////////////////////
 //// Motivation and Explanation for LinearCachingAllocator ////
 
@@ -6,14 +5,14 @@
 //
 //    Even though this allocator employs a custom binary search
 //    similar to lower-bound lookup, it deserve the name linear
-//    for a number of reasons. 
+//    for a number of reasons.
 //
-//    Most importantly, it has a linear growth factor - for 
+//    Most importantly, it has a linear growth factor - for
 //    every new allocation not currently cached, it increases
-//    the cache size by one. 
+//    the cache size by one.
 //
 //    Likewise, the caching allocator needs to scan for unused
-//    blocks once it locates a segment of the cache that can 
+//    blocks once it locates a segment of the cache that can
 //    fulfill the size request. In the worst case, this is
 //    O(N), as each element could be the same size and all blocks
 //    could currently be in use.
@@ -31,7 +30,7 @@
 //
 //        -- Frequent check-ins from used blocks to restore holes
 //
-// -- Why use an array of indpendent `u8 slices? -- 
+// -- Why use an array of indpendent `u8 slices? --
 //
 //    A typical implementation strategy for free-list style allocators
 //    (or cascading allocators more generally) is to embed a link
@@ -70,7 +69,6 @@
 const std = @import("std");
 
 const OrderedCache = struct {
-
     const Self = @This();
 
     const CacheType = std.ArrayList(CacheBlock);
@@ -86,13 +84,13 @@ const OrderedCache = struct {
         return Self{ .cache = CacheType.init(allocator) };
     }
     pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
-        for(0..self.size()) |i| {
+        for (0..self.size()) |i| {
             allocator.free(self.itemData(i));
         }
         self.cache.deinit();
     }
     pub fn clear(self: *Self, allocator: *std.mem.Allocator) void {
-        for(0..self.size()) |i| {
+        for (0..self.size()) |i| {
             allocator.free(self.itemData(i));
         }
         // Calling resize will test for capacity and then
@@ -100,7 +98,7 @@ const OrderedCache = struct {
         // going to zero, we don't need to check for capacity.
         self.cache.items.len = 0;
     }
-    
+
     pub inline fn size(self: *const Self) usize {
         return self.cache.items.len;
     }
@@ -137,7 +135,7 @@ const OrderedCache = struct {
 
         // heuristic: requests cannot grab allocations greater than 2x their size
         const limit = n <<| 1;
-        
+
         var i = idx;
         while ((i < self.size()) and (self.itemSize(i) <= limit)) : (i += 1) {
             if (!self.itemUsed(i)) {
@@ -163,15 +161,14 @@ const OrderedCache = struct {
         var i = if (data.len <= self.itemSize(0)) 0 else self.lowerBoundSize(data.len);
 
         while ((i < self.size()) and (self.itemSize(i) <= limit)) : (i += 1) {
-            if(self.itemData(i).ptr == data.ptr) {
+            if (self.itemData(i).ptr == data.ptr) {
                 return i;
             }
         }
         return null;
     }
-    
-    pub fn withdraw(self: *Self, n: usize) ?[]u8 {
 
+    pub fn withdraw(self: *Self, n: usize) ?[]u8 {
         if ((self.size() == 0) or (n == 0)) {
             return null;
         }
@@ -190,11 +187,10 @@ const OrderedCache = struct {
         }
 
         // Begin scanning from first candidate index.
-        return self.scanForUnused(self.lowerBoundSize(n), n);  
+        return self.scanForUnused(self.lowerBoundSize(n), n);
     }
 
     pub fn deposit(self: *Self, data: []u8) !void {
-
         if (data.len == 0) {
             return;
         }
@@ -210,7 +206,7 @@ const OrderedCache = struct {
 
         var i = idx;
         while ((i < self.size()) and (self.itemSize(i) <= limit)) : (i += 1) {
-            if(self.itemData(i).ptr == data.ptr) {
+            if (self.itemData(i).ptr == data.ptr) {
                 return self.setUsed(i, false);
             }
         }
@@ -219,18 +215,11 @@ const OrderedCache = struct {
         try self.cache.insert(idx, .{ .data = data });
     }
 
-    pub fn addToCache(
-        self: *Self, 
-        comptime T: type, 
-        sizes: [] const usize, 
-        allocator: *std.mem.Allocator
-    ) !void {
-
+    pub fn addToCache(self: *Self, comptime T: type, sizes: []const usize, allocator: *std.mem.Allocator) !void {
         try self.cache.ensureUnusedCapacity(sizes.len);
 
         for (sizes) |len| {
-
-            var data = try allocator.alloc(T, len);
+            const data = try allocator.alloc(T, len);
 
             self.deposit(std.mem.sliceAsBytes(data)) catch {
                 allocator.free(data);
@@ -238,13 +227,12 @@ const OrderedCache = struct {
             };
         }
     }
-};        
+};
 
 ////////////////////////////////////////////////////////
 //////// LinearCachingAllocator Implementation /////////
 
 pub const LinearCachingAllocator = struct {
-
     const Self = @This();
 
     buffer: OrderedCache = OrderedCache.init(std.heap.page_allocator),
@@ -252,7 +240,7 @@ pub const LinearCachingAllocator = struct {
     backing_allocator: std.mem.Allocator = std.heap.page_allocator,
 
     // TODO: Create a dummy mutex that can be swapped via policy
-    mutex: std.Thread.Mutex = std.Thread.Mutex{ },
+    mutex: std.Thread.Mutex = std.Thread.Mutex{},
 
     pub fn clear(self: *Self) void {
         self.buffer.clear(&self.backing_allocator);
@@ -262,7 +250,7 @@ pub const LinearCachingAllocator = struct {
         self.buffer.deinit(&self.backing_allocator);
     }
 
-    pub fn allocator(self: *Self) std.mem.Allocator {        
+    pub fn allocator(self: *Self) std.mem.Allocator {
         return .{
             .ptr = self,
             .vtable = &.{
@@ -273,24 +261,19 @@ pub const LinearCachingAllocator = struct {
         };
     }
 
-    pub fn alloc(
-        ctx: *anyopaque,
-        len: usize,
-        log2_ptr_align: u8,
-        ret_addr: usize
-    ) ?[*]u8 {        
+    pub fn alloc(ctx: *anyopaque, len: usize, log2_ptr_align: u8, ret_addr: usize) ?[*]u8 {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         self.mutex.lock();
 
         defer self.mutex.unlock();
 
-        if(self.buffer.withdraw(len)) |data| {
+        if (self.buffer.withdraw(len)) |data| {
             return data.ptr;
         }
         return self.backing_allocator.rawAlloc(len, log2_ptr_align, ret_addr);
     }
-    
+
     pub fn resize(
         ctx: *anyopaque,
         old_mem: []u8,
@@ -306,11 +289,9 @@ pub const LinearCachingAllocator = struct {
 
         // locate pointer in cache (if exists)
         if (self.buffer.locateMemory(old_mem)) |idx| {
-            
             var data = self.buffer.itemData(idx);
 
             if (self.backing_allocator.rawResize(data, log2_align, new_len, ret_addr)) {
-
                 data = self.buffer.cache.orderedRemove(idx).data;
 
                 // The only reason this would fail is because
@@ -319,7 +300,7 @@ pub const LinearCachingAllocator = struct {
                 // is already large enough for this insertion.
 
                 data.len = new_len;
-                
+
                 self.buffer.deposit(data) catch unreachable;
 
                 return true;
@@ -327,7 +308,7 @@ pub const LinearCachingAllocator = struct {
         }
         return false;
     }
-     
+
     pub fn free(
         ctx: *anyopaque,
         old_mem: []u8,
@@ -345,11 +326,7 @@ pub const LinearCachingAllocator = struct {
         };
     }
 
-    pub fn addToCache(
-        self: *Self, 
-        comptime T: type, 
-        sizes: [] const usize
-    ) !void {
+    pub fn addToCache(self: *Self, comptime T: type, sizes: []const usize) !void {
         return self.buffer.addToCache(T, sizes, &self.backing_allocator);
     }
 };
@@ -357,9 +334,9 @@ pub const LinearCachingAllocator = struct {
 /////////////////////////////////////////////////////////
 /////// OrderedCache Testing Section ////////////////////
 
-fn ensureWeakOrdering(buffer: *const OrderedCache) bool {    
-    for(0..(buffer.size() - 1)) |i| {
-        if(buffer.itemSize(i) > buffer.itemSize(i + 1)) {
+fn ensureWeakOrdering(buffer: *const OrderedCache) bool {
+    for (0..(buffer.size() - 1)) |i| {
+        if (buffer.itemSize(i) > buffer.itemSize(i + 1)) {
             return false;
         }
     }
@@ -367,7 +344,6 @@ fn ensureWeakOrdering(buffer: *const OrderedCache) bool {
 }
 
 test "OrderedCache: ensure weak-ordering" {
-    
     const GPA = @import("std").heap.GeneralPurposeAllocator(.{});
     const rand = @import("std").rand;
 
@@ -377,11 +353,10 @@ test "OrderedCache: ensure weak-ordering" {
     var PCG = rand.Pcg.init(42);
     var pcg = PCG.random();
 
-
     defer {
-        buffer.deinit(&allocator);   
-        if (gpa.deinit() == .leak) { 
-            @panic("LEAK DETECTED"); 
+        buffer.deinit(&allocator);
+        if (gpa.deinit() == .leak) {
+            @panic("LEAK DETECTED");
         }
     }
 
@@ -389,11 +364,11 @@ test "OrderedCache: ensure weak-ordering" {
     // and then clear, rinse, repeat. Currently, this
     // is run 10 * (100 + 100) times, so 2000 items.
 
-    for(0..10) |_| {
+    for (0..10) |_| {
         // some repeat elements
-        for(0..100) |_| {
+        for (0..100) |_| {
             var n = pcg.int(usize) % 100;
-            n = if(n == 0) 1 else n;
+            n = if (n == 0) 1 else n;
             try buffer.deposit(try allocator.alloc(u8, n));
         }
         try std.testing.expectEqual(buffer.size(), 100);
@@ -402,9 +377,9 @@ test "OrderedCache: ensure weak-ordering" {
         try std.testing.expectEqual(buffer.size(), 0);
 
         // many repeat elements
-        for(0..100) |_| {
+        for (0..100) |_| {
             var n = pcg.int(usize) % 10;
-            n = if(n == 0) 1 else n;
+            n = if (n == 0) 1 else n;
             try buffer.deposit(try allocator.alloc(u8, n));
         }
 
@@ -416,7 +391,6 @@ test "OrderedCache: ensure weak-ordering" {
 }
 
 test "OrderedCache: basic heuristic testing" {
-    
     const GPA = @import("std").heap.GeneralPurposeAllocator(.{});
 
     var gpa = GPA{};
@@ -424,26 +398,26 @@ test "OrderedCache: basic heuristic testing" {
     var buffer = OrderedCache.init(allocator);
 
     defer {
-        buffer.deinit(&allocator);   
-        if (gpa.deinit() == .leak) { 
-            @panic("LEAK DETECTED"); 
+        buffer.deinit(&allocator);
+        if (gpa.deinit() == .leak) {
+            @panic("LEAK DETECTED");
         }
     }
 
     // Say you have items A, B, C.
-    // 
+    //
     // A wants 100 bytes
-    // 
+    //
     // B wants 300 bytes
-    // 
+    //
     // Then both A and B surrender their memory… so we now have cached { 100, 300 }
-    // 
+    //
     // Now let’s say that A is followed by C, so it’s asking for { 100, 100 }… but the cache only has { 100, 300 }
-    // 
+    //
     // Now if B comes back and wants memory, it’ll ask for 300 bytes again. We’re empty so we have to allocate… now we have { 100, 300, 300 }.
-    // 
+    //
     // Instead, if we forced C to allocate when it asked for 100 bytes and we were empty, we would end up with { 100, 100, 300 } which is ideal.
-    // 
+    //
     // So the heuristic just has to make sure that the actual requests are as close to what ends up in the cache… something like:
     //
     //    optimize min: |sum(actual) - sum(cached)|
@@ -453,13 +427,13 @@ test "OrderedCache: basic heuristic testing" {
     const request3: usize = 100;
 
     {
-    // allocate first two requests
-    var a = try allocator.alloc(u8, request1);
-    var b = try allocator.alloc(u8, request2);
+        // allocate first two requests
+        const a = try allocator.alloc(u8, request1);
+        const b = try allocator.alloc(u8, request2);
 
-    // deposit requests into cache (simulating free)
-    try buffer.deposit(a);
-    try buffer.deposit(b);
+        // deposit requests into cache (simulating free)
+        try buffer.deposit(a);
+        try buffer.deposit(b);
     }
 
     // cache now contains { 100, 300 }
@@ -467,15 +441,15 @@ test "OrderedCache: basic heuristic testing" {
     try std.testing.expectEqual(buffer.itemSize(1), 300);
 
     {
-    // request memory { 100, 100, 300 }
-    var a = buffer.withdraw(request1) orelse try allocator.alloc(u8, request1);
-    var c = buffer.withdraw(request3) orelse try allocator.alloc(u8, request3);
-    var b = buffer.withdraw(request2) orelse try allocator.alloc(u8, request2);
+        // request memory { 100, 100, 300 }
+        const a = buffer.withdraw(request1) orelse try allocator.alloc(u8, request1);
+        const c = buffer.withdraw(request3) orelse try allocator.alloc(u8, request3);
+        const b = buffer.withdraw(request2) orelse try allocator.alloc(u8, request2);
 
-    // deposit requests into cache (simulating free)
-    try buffer.deposit(a);
-    try buffer.deposit(b);
-    try buffer.deposit(c);
+        // deposit requests into cache (simulating free)
+        try buffer.deposit(a);
+        try buffer.deposit(b);
+        try buffer.deposit(c);
     }
     // cache should contain { 100, 100, 300 }
     try std.testing.expectEqual(buffer.itemSize(0), 100);
@@ -487,44 +461,37 @@ test "OrderedCache: basic heuristic testing" {
 /////// LinearCachingAllocator Testing Section /////////////
 
 test "LinearCachingAllocator: initialization" {
+    const TypeA = struct { x: usize = 0 };
 
-    const TypeA = struct {
-        x: usize = 0      
-    };
-
-    var caching_allocator = LinearCachingAllocator{ };
+    var caching_allocator = LinearCachingAllocator{};
 
     defer caching_allocator.deinit();
 
     var allocator = caching_allocator.allocator();
 
-    var a = try allocator.alloc(TypeA, 10);
+    const a = try allocator.alloc(TypeA, 10);
 
     allocator.free(a);
 
     try std.testing.expectEqual(caching_allocator.buffer.size(), 1);
-
 }
 
 test "LinearCachingAllocator: basic cache utilization" {
+    const TypeA = struct { x: usize = 0 };
 
-    const TypeA = struct {
-        x: usize = 0      
-    };
-
-    var caching_allocator = LinearCachingAllocator{ };
+    var caching_allocator = LinearCachingAllocator{};
 
     defer caching_allocator.deinit();
 
     var allocator = caching_allocator.allocator();
 
-    var a = try allocator.alloc(TypeA, 10);
+    const a = try allocator.alloc(TypeA, 10);
 
-    var b = a;
+    const b = a;
 
     allocator.free(a);
 
-    var c = try allocator.alloc(TypeA, 10);
+    const c = try allocator.alloc(TypeA, 10);
 
     try std.testing.expect(b.ptr == c.ptr);
 }
@@ -534,15 +501,10 @@ test "LinearCachingAllocator: alignment" {
     // TypeA will be aligned by usize, and TypeB
     // will be forced to go up rung in alignment
 
-    const TypeA = struct {
-        x: usize = 0      
-    };
-    const TypeB = struct {
-        x: usize = 0,   
-        y: bool = false
-    };
+    const TypeA = struct { x: usize = 0 };
+    const TypeB = struct { x: usize = 0, y: bool = false };
 
-    { 
+    {
         // ensure that log2 alignment is different...
         const align_a = std.math.ceilPowerOfTwoAssert(usize, @bitSizeOf(TypeA));
         const align_b = std.math.ceilPowerOfTwoAssert(usize, @bitSizeOf(TypeB));
@@ -551,20 +513,20 @@ test "LinearCachingAllocator: alignment" {
         try std.testing.expect(log2_a < log2_b);
     }
 
-    var caching_allocator = LinearCachingAllocator{ };
+    var caching_allocator = LinearCachingAllocator{};
 
     defer caching_allocator.deinit();
 
     var allocator = caching_allocator.allocator();
 
-    var a = try allocator.alloc(TypeA, 10);
+    const a = try allocator.alloc(TypeA, 10);
     try std.testing.expectEqual(a.len, 10);
 
     allocator.free(a);
 
-    var b = try allocator.alloc(TypeB, 4);
+    const b = try allocator.alloc(TypeB, 4);
     try std.testing.expectEqual(b.len, 4);
-    
+
     try std.testing.expect(@intFromPtr(a.ptr) == @intFromPtr(b.ptr));
 
     allocator.free(b);
@@ -573,7 +535,7 @@ test "LinearCachingAllocator: alignment" {
 
     // attempt to iterate through items
 
-    for(b) |*item| {
+    for (b) |*item| {
         item.x = 0;
         item.y = false;
     }
@@ -584,7 +546,7 @@ test "LinearCachingAllocator: resize" {
     // So testing resize is tough. Resizes can "fail"
     // legitimately. That's why they return a bool and
     // not an error. Unfortunately, that means it's
-    // awkward to test it directly. 
+    // awkward to test it directly.
 
     // That said, we can keep a few things in mind:
 
@@ -608,11 +570,9 @@ test "LinearCachingAllocator: resize" {
 
     const rand = @import("std").rand;
 
-    const TypeA = struct {
-        x: usize = 0      
-    };
+    const TypeA = struct { x: usize = 0 };
 
-    var caching_allocator = LinearCachingAllocator{ };
+    var caching_allocator = LinearCachingAllocator{};
 
     defer caching_allocator.deinit();
 
@@ -626,64 +586,58 @@ test "LinearCachingAllocator: resize" {
     // depositing it.
 
     for (0..100) |_| {
-
         var n = pcg.int(usize) % 100;
 
-        n = if(n == 0) 1 else n;
+        n = if (n == 0) 1 else n;
 
-        var data = try allocator.alloc(TypeA, n);
+        const data = try allocator.alloc(TypeA, n);
 
         // deposit into cache...
-        allocator.free(data); 
+        allocator.free(data);
 
-        var check: []u8 = std.mem.sliceAsBytes(data);
+        const check: []u8 = std.mem.sliceAsBytes(data);
 
         // lookup memory in allocator cache...
-        var index = caching_allocator.buffer.locateMemory(check);
+        const index = caching_allocator.buffer.locateMemory(check);
 
         // null means we didn't find it.
         try std.testing.expect(index != null);
 
-        var item = caching_allocator.buffer.itemData(index.?);
+        const item = caching_allocator.buffer.itemData(index.?);
 
         // ensure that it is the same data.
         try std.testing.expect(@intFromPtr(check.ptr) == @intFromPtr(item.ptr));
     }
-    
+
     // we need to be beyond the heuristic to test.
-    var data = try allocator.alloc(TypeA, 300);
+    const data = try allocator.alloc(TypeA, 300);
 
     { // check that un-cached memory isn't "found".
-        var check: []u8 = std.mem.sliceAsBytes(data);
-        var index = caching_allocator.buffer.locateMemory(check);
+        const check: []u8 = std.mem.sliceAsBytes(data);
+        const index = caching_allocator.buffer.locateMemory(check);
         try std.testing.expect(index == null);
     }
 
     // deposit into cache...
-    allocator.free(data); 
+    allocator.free(data);
 
     { // check that cached memory is found.
-        var check: []u8 = std.mem.sliceAsBytes(data);
-        var index = caching_allocator.buffer.locateMemory(check);
+        const check: []u8 = std.mem.sliceAsBytes(data);
+        const index = caching_allocator.buffer.locateMemory(check);
         try std.testing.expect(index != null);
-        var item = caching_allocator.buffer.itemData(index.?);
+        const item = caching_allocator.buffer.itemData(index.?);
         try std.testing.expect(@intFromPtr(check.ptr) == @intFromPtr(item.ptr));
     }
 }
 
 test "LinearCachingAllocator: cache-warming" {
+    const TypeA = struct { x: usize = 0 };
 
-    const TypeA = struct {
-        x: usize = 0      
-    };
-
-    var caching_allocator = LinearCachingAllocator{ };
+    var caching_allocator = LinearCachingAllocator{};
 
     defer caching_allocator.deinit();
 
-    try caching_allocator.addToCache(
-        TypeA, &[_]usize{ 100, 200, 300, 400, 500, 600 }
-    );
+    try caching_allocator.addToCache(TypeA, &[_]usize{ 100, 200, 300, 400, 500, 600 });
 
     try std.testing.expectEqual(caching_allocator.buffer.size(), 6);
     try std.testing.expectEqual(caching_allocator.buffer.itemSize(0), 100 * @bitSizeOf(TypeA) / @bitSizeOf(u8));
@@ -693,9 +647,7 @@ test "LinearCachingAllocator: cache-warming" {
     try std.testing.expectEqual(caching_allocator.buffer.itemSize(4), 500 * @bitSizeOf(TypeA) / @bitSizeOf(u8));
     try std.testing.expectEqual(caching_allocator.buffer.itemSize(5), 600 * @bitSizeOf(TypeA) / @bitSizeOf(u8));
 
-    try caching_allocator.addToCache(
-        TypeA, &[_]usize{ 100, 200, 300, 400, 500 }
-    );
+    try caching_allocator.addToCache(TypeA, &[_]usize{ 100, 200, 300, 400, 500 });
 
     try std.testing.expectEqual(caching_allocator.buffer.size(), 11);
     try std.testing.expectEqual(caching_allocator.buffer.itemSize(1), 100 * @bitSizeOf(TypeA) / @bitSizeOf(u8));
