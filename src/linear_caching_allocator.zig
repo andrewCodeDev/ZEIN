@@ -1,6 +1,6 @@
 
 ///////////////////////////////////////////////////////////////
-//// Motivation and Explanation for CachingAllocator ////
+//// Motivation and Explanation for LinearCachingAllocator ////
 
 // -- General Introduction --
 //
@@ -234,7 +234,7 @@ const OrderedCache = struct {
 };        
 
 ////////////////////////////////////////////////////////
-//////// CachingAllocator Implementation ///////////////
+//////// LinearCachingAllocator Implementation ///////////////
 
 const Config = struct {
     mutex: bool = false,
@@ -245,7 +245,7 @@ const DummyMutex = struct {
     fn unlock(_: *DummyMutex) void {}
 };
 
-pub fn CachingAllocator(comptime config: Config) type {
+pub fn LinearCachingAllocator(comptime config: Config) type {
 
     return struct {
 
@@ -494,15 +494,15 @@ test "OrderedCache: basic heuristic testing" {
 }
 
 /////////////////////////////////////////////////////////
-/////// CachingAllocator Testing Section /////////////
+/////// LinearCachingAllocator Testing Section /////////////
 
-test "CachingAllocator: buffer size" {
+test "LinearCachingAllocator: buffer size" {
 
     const TypeA = struct {
         x: usize = 0      
     };
 
-    var caching_allocator = CachingAllocator(.{}).init(std.heap.page_allocator);
+    var caching_allocator = LinearCachingAllocator(.{}).init(std.heap.page_allocator);
 
     defer caching_allocator.deinit();
 
@@ -515,13 +515,13 @@ test "CachingAllocator: buffer size" {
     try std.testing.expectEqual(caching_allocator.cache.size(), 1);
 }
 
-test "CachingAllocator: cache utilization" {
+test "LinearCachingAllocator: cache utilization" {
 
     const TypeA = struct {
         x: usize = 0      
     };
 
-    var caching_allocator = CachingAllocator(.{}).init(std.heap.page_allocator);
+    var caching_allocator = LinearCachingAllocator(.{}).init(std.heap.page_allocator);
 
     defer caching_allocator.deinit();
 
@@ -538,7 +538,7 @@ test "CachingAllocator: cache utilization" {
     try std.testing.expect(b.ptr == c.ptr);
 }
 
-test "CachingAllocator: alignment" {
+test "LinearCachingAllocator: alignment" {
 
     const TypeA = struct {
         x: usize = 0      
@@ -557,7 +557,7 @@ test "CachingAllocator: alignment" {
         try std.testing.expect(log2_a < log2_b);
     }
 
-    var caching_allocator = CachingAllocator(.{}).init(std.heap.page_allocator);
+    var caching_allocator = LinearCachingAllocator(.{}).init(std.heap.page_allocator);
 
     defer caching_allocator.deinit();
 
@@ -585,7 +585,7 @@ test "CachingAllocator: alignment" {
     }
 }
 
-test "CachingAllocator: resize" {
+test "LinearCachingAllocator: resize" {
 
     // So testing resize is tough. Resizes can "fail"
     // legitimately. That's why they return a bool and
@@ -618,7 +618,7 @@ test "CachingAllocator: resize" {
         x: usize = 0      
     };
 
-    var caching_allocator = CachingAllocator(.{}).init(std.heap.page_allocator);
+    var caching_allocator = LinearCachingAllocator(.{}).init(std.heap.page_allocator);
 
     defer caching_allocator.deinit();
 

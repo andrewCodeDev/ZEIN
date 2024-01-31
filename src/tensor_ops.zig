@@ -43,7 +43,7 @@ inline fn reduceInit(comptime op: ReduceOp, comptime T: type) T {
 
 pub fn sum(x: anytype) @TypeOf(x.*).ValueType {
     std.debug.assert(x.valueSize() > 0);
-    return simdReduce(ReduceOp.Mul, addGeneric, x, reduceInit(ReduceOp.Add, @TypeOf(x.*).ValueType));
+    return simdReduce(ReduceOp.Add, addGeneric, x, reduceInit(ReduceOp.Add, @TypeOf(x.*).ValueType));
 }
 pub fn product(x: anytype) @TypeOf(x.*).ValueType {
     std.debug.assert(x.valueSize() > 0);
@@ -381,7 +381,7 @@ fn innerProductImpl(
 
     inline for (0..plan.total) |I| {
         
-        const size = if (plan.s_ctrl[I] == 0) 
+        const size = if (comptime plan.s_ctrl[I] == 0) 
             x.getSize(plan.x_perm[I]) else y.getSize(plan.y_perm[I]);
 
         for (0..size) |i| {
@@ -428,49 +428,42 @@ pub fn outerProduct(comptime expression: []const u8, x: anytype, y: anytype, z: 
     unreachable; //TODO
 }
 
-//pub inline fn recursiveOuterProduct(
-//    comptime VT: type, // value type
-//    comptime I: usize, // starting index
-//    comptime plan: anytype, // InnerProductPlan
-//    x: anytype, // lhs operand tensor
-//    y: anytype, // rhs operand tensor
-//    z: anytype, // output tensor
-//) void {
-//    const XT = @TypeOf(x.*);
-//    const YT = @TypeOf(y.*);
-//    const ZT = @TypeOf(z.*);
-//
-//    const size = @call(.always_inline, sizeSelector, .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y });
-//
-//    if (I < (plan.total - 1)) {
-//        var i: IT = 0;
-//        while (i < size) : (i += 1) {
-//            if (comptime plan.x_perm[I] != plan.pass) {
-//                xc[plan.x_perm[I]] = i;
-//            }
-//            if (comptime plan.y_perm[I] != plan.pass) {
-//                yc[plan.y_perm[I]] = i;
-//            }
-//            zc[plan.z_perm[I]] = i;
-//            @call(.always_inline, recursiveInnerProduct, .{ VT, IT, (I + 1), plan, x, y, z, xc, yc, zc });
-//        }
-//    } else {
-//        var i: IT = 0;
-//        while (i < size) : (i += 1) {
-//            if (comptime plan.x_perm[I] != plan.pass) {
-//                xc[plan.x_perm[I]] = i;
-//            }
-//            if (comptime plan.y_perm[I] != plan.pass) {
-//                yc[plan.y_perm[I]] = i;
-//            }
-//            zc[plan.z_perm[I]] = i;
-//            const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
-//            const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
-//            const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
-//            z.values[z_n] += x.values[x_n] * y.values[y_n];
-//        }
-//    }
-//}
+pub inline fn recursiveOuterProduct(
+    comptime plan: anytype, // InnerProductPlan
+    x: anytype, // lhs operand tensor
+    y: anytype, // rhs operand tensor
+    z: anytype, // output tensor
+) void {
+    const XT = @TypeOf(x.*);
+    const YT = @TypeOf(y.*);
+    const ZT = @TypeOf(z.*);
+
+    // index containers for tensor computation
+    var xc: [XT.Rank]SizeType = undefined;
+    var yc: [YT.Rank]SizeType = undefined;
+    var zc: [ZT.Rank]SizeType = undefined;
+
+    inline for (0..plan.total) |I| {
+
+        const size = if (plan.s_ctrl[I] == 0) 
+            x.getSize(plan.x_perm[I]) else y.getSize(plan.y_perm[I]);
+
+        var i: SizeType = 0;
+
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
+            if (comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            zc[plan.z_perm[I]] = i;
+        }
+
+        if (I == (plan.total - 1)) {
+             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
+             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
+             const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
+             z.values[z_n] += x.values[x_n] * y.values[y_n];
+        }
+    }
+}
 
 // <>--------------------------------------------------------<>
 
@@ -513,14 +506,14 @@ fn simdArithmetic(
     
     if (comptime std.simd.suggestVectorLength(T)) |N| {
         var j: usize = N;    
-        while(j <= x.len) : ({i += N; j += N; }) {
+        while(j <= x.valueSize()) : ({i += N; j += N; }) {
             const v: @Vector(N, T) = x.values[i..j][0..N].*;
             const u: @Vector(N, T) = y.values[i..j][0..N].*;
-            z[i..j][0..N].* = @call(.always_inline, BinaryFunc, .{v, u});
+            z.values[i..j][0..N].* = @call(.always_inline, BinaryFunc, .{v, u});
         }
     }
 
-    while (i < x.len) : (i += 1) {
+    while (i < x.valueSize()) : (i += 1) {
         z.values[i] = @call(.always_inline, BinaryFunc, .{ x.values[i], y.values[i] });
     }
 }

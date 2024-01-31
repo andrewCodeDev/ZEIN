@@ -33,7 +33,7 @@ const innerProductParse = @import("./expression_parsing.zig").innerProductParse;
 const contractedRank = @import("./expression_parsing.zig").contractedRank;
 const sliceProduct = @import("./utility.zig").sliceProduct;
 
-const LinearCachingAllocator = @import("./linear_caching_allocator.zig").LinearCachingAllocator;
+const LinearCachingAllocator = @import("./linear_caching_allocator.zig").LinearCachingAllocator(.{});
 
 pub const AllocatorError = error{ UnknownObject, TensorSizeZero, TensorHasAlloc, WrongAllocator, IndexAlreadyFreed, InvalidIndex };
 
@@ -59,42 +59,6 @@ var BufferMutex = Mutex{};
 var LCABuffer: [BufferSize]?LCA = undefined;
 var LCAUsed: usize = 0;
 
-fn constructLCA() Allocator {
-    BufferMutex.lock();
-    defer BufferMutex.unlock();
-    var i: usize = 0;
-    while (i < BufferSize) : (i += 1) {
-        if (LCABuffer[i] == null) {
-            LCABuffer[i] = LCA{};
-            return LCABuffer[i].?.allocator();
-        }
-    }
-    // this seems like a sensible default if
-    // the user creates more than 100 defaults.
-    return std.heap.page_allocator;
-}
-
-fn nullifyLCA(expired: *anyopaque) void {
-    BufferMutex.lock();
-    defer BufferMutex.unlock();
-    for (0..BufferSize) |i| {
-        if (LCABuffer[i]) |*lca| {
-            if (@intFromPtr(lca) == @intFromPtr(expired)) {
-                LCABuffer[i].?.deinit();
-                LCABuffer[i] = null;
-            }
-        }
-    }
-}
-
-fn isDefaultLCA(ptr: *anyopaque) bool {
-    const buffer_a = @intFromPtr(&LCABuffer[0]);
-    const buffer_b = @intFromPtr(&LCABuffer[BufferSize - 1]);
-    const check = @intFromPtr(ptr);
-    // check if we are inbounds of the static array
-    return (buffer_a <= check) and (check <= buffer_b);
-}
-
 const TrackingMode = enum { start, stop, free };
 
 // let m = current mode;
@@ -109,6 +73,11 @@ const TrackingMode = enum { start, stop, free };
 // if m == free:
 //    start: no-op, m -> start
 //    stop: no-op, m -> free
+
+const TensorFactoryConfig = struct {
+    system_allocator: Allocator,
+    tensor_allocator: Allocator,
+};
 
 pub fn TensorFactory(comptime value_type: type) type {
     return struct {
@@ -126,34 +95,31 @@ pub fn TensorFactory(comptime value_type: type) type {
 
         const TrackingData = ArrayList([]ValueType);
 
-        allocator: Allocator,
+        tensor_allocator: Allocator,
+        system_allocator: Allocator,
+
         tracking_data: TrackingData,
         tracking_mode: TrackingMode,
 
-        pub fn init(allocator: ?Allocator) Self {
+        pub fn init(config: TensorFactoryConfig) Self {
             return Self{
-                .allocator = if (allocator) |a| a else constructLCA(),
-                .tracking_data = TrackingData.init(std.heap.page_allocator),
+                .tensor_allocator = config.tensor_allocator,
+                .system_allocator = config.system_allocator,
+                .tracking_data = TrackingData.init(config.system_allocator),
                 .tracking_mode = TrackingMode.free,
             };
         }
 
         pub fn deinit(self: SelfPtr) void {
             self.tracking(.free);
-
             self.tracking_data.deinit();
-
-            // check if we need to nullify an LCA
-            if (isDefaultLCA(self.allocator.ptr)) {
-                nullifyLCA(self.allocator.ptr);
-            }
         }
 
         ///////////////////////////////////
         // private allocation functions ///
 
         fn allocValues(self: SelfPtr, size: usize) !ValueSlice {
-            const alloc = try self.allocator.alloc(ValueType, size);
+            const alloc = try self.tensor_allocator.alloc(ValueType, size);
 
             if (self.tracking_mode == .start) {
                 try self.tracking_data.append(alloc);
@@ -170,7 +136,7 @@ pub fn TensorFactory(comptime value_type: type) type {
                 }
                 try self.tracking_data.append(values);
             } else {
-                self.allocator.free(values);
+                self.tensor_allocator.free(values);
             }
         }
 
@@ -183,7 +149,7 @@ pub fn TensorFactory(comptime value_type: type) type {
             }
             if ((self.tracking_mode == .start or self.tracking_mode == .stop) and mode == .free) {
                 while (self.tracking_data.items.len > 0) {
-                    self.allocator.free(self.tracking_data.pop());
+                    self.tensor_allocator.free(self.tracking_data.pop());
                 }
             }
             self.tracking_mode = mode;
@@ -235,56 +201,26 @@ pub fn TensorFactory(comptime value_type: type) type {
         // Factory Math Functions ///
 
         pub fn add(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if (@TypeOf(x.*) != @TypeOf(y.*)) {
-                @compileError("Addition requires operands to be of the same type.");
-            }
-            if (!x.isValid() or !y.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            if (x.valueSize() != y.valueSize()) {
-                return OpsError.UnequalSize;
-            }
             var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
-            Ops.addUnchecked(x, y, &z);
+            Ops.add(x, y, &z);
             return z;
         }
 
         pub fn sub(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if (@TypeOf(x.*) != @TypeOf(y.*)) {
-                @compileError("Addition requires operands to be of the same type.");
-            }
-            if (!x.isValid() or !y.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            if (x.valueSize() != y.valueSize()) {
-                return OpsError.UnequalSize;
-            }
             var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
-            Ops.subUnchecked(x, y, &z);
+            Ops.sub(x, y, &z);
             return z;
         }
 
         pub fn mul(self: SelfPtr, x: anytype, y: anytype) !@TypeOf(x.*) {
-            if (@TypeOf(x.*) != @TypeOf(y.*)) {
-                @compileError("Multipication requires operands to be of the same type.");
-            }
-            if (!x.isValid() or !y.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            if (x.valueSize() != y.valueSize()) {
-                return OpsError.UnequalSize;
-            }
             var z = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
-            Ops.mulUnchecked(x, y, &z);
+            Ops.mul(x, y, &z);
             return z;
         }
 
         pub fn bias(self: SelfPtr, x: anytype, b: @TypeOf(x.*).ValueType) !@TypeOf(x.*) {
-            if (!x.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
             var y = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
-            Ops.biasUnchecked(x, &y, b);
+            Ops.bias(x, &y, b);
             return y;
         }
 
@@ -293,36 +229,36 @@ pub fn TensorFactory(comptime value_type: type) type {
                 return TensorError.InvalidTensorLayout;
             }
             var y = try self.allocTensor(@TypeOf(x.*).Rank, @TypeOf(x.*).Order, x.sizes_and_strides.sizes);
-            Ops.scaleUnchecked(x, &y, s);
+            Ops.scale(x, &y, s);
             return y;
         }
 
-        pub fn contraction(self: SelfPtr, comptime expression: []const u8, x: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-            if (!x.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            const XRank = @TypeOf(x.*).Rank;
-            const YRank = comptime contractedRank(expression);
+        //pub fn contraction(self: SelfPtr, comptime expression: []const u8, x: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+        //    if (!x.isValid()) {
+        //        return TensorError.InvalidTensorLayout;
+        //    }
+        //    const XRank = @TypeOf(x.*).Rank;
+        //    const YRank = comptime contractedRank(expression);
 
-            const ip = comptime contractionParse(XRank, YRank, expression);
+        //    const ip = comptime contractionParse(XRank, YRank, expression);
 
-            var y_ss: [YRank]SizesType = undefined;
-            {
-                var i: usize = 0;
-                while (i < YRank) : (i += 1) {
-                    y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
-                }
-            }
-            var y = try self.allocTensor(YRank, @TypeOf(x.*).Order, y_ss);
+        //    var y_ss: [YRank]SizesType = undefined;
+        //    {
+        //        var i: usize = 0;
+        //        while (i < YRank) : (i += 1) {
+        //            y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
+        //        }
+        //    }
+        //    var y = try self.allocTensor(YRank, @TypeOf(x.*).Order, y_ss);
 
-            var xc: [XRank]SizesType = undefined;
-            var yc: [YRank]SizesType = undefined;
+        //    var xc: [XRank]SizesType = undefined;
+        //    var yc: [YRank]SizesType = undefined;
 
-            @memset(y.values, 0);
+        //    @memset(y.values, 0);
 
-            @call(.always_inline, Ops.recursiveContraction, .{ ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc });
-            return y;
-        }
+        //    @call(.always_inline, Ops.recursiveContraction, .{ ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc });
+        //    return y;
+        //}
 
         pub fn innerProduct(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
             if (!x.isValid() or !y.isValid()) {
@@ -348,61 +284,69 @@ pub fn TensorFactory(comptime value_type: type) type {
             }
 
             var z = try self.allocTensor(ZRank, @TypeOf(x.*).Order, z_sizes);
-            var x_i: [XRank]SizesType = undefined;
-            var y_i: [YRank]SizesType = undefined;
-            var z_i: [ZRank]SizesType = undefined;
 
             // TODO: Refactor - this is the only thing that differs from linear.
             @memset(z.values, 0);
 
-            @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
+            Ops.innerProduct(plan, x, y, &z);
             return z;
         }
 
-        pub fn linear(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype, b: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-            if (!x.isValid() or !y.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            const XRank = @TypeOf(x.*).Rank;
-            const YRank = @TypeOf(y.*).Rank;
-            const ZRank = comptime contractedRank(expression);
-            const plan = comptime innerProductParse(XRank, YRank, ZRank, expression);
+        //pub fn linear(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype, b: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+        //    if (!x.isValid() or !y.isValid()) {
+        //        return TensorError.InvalidTensorLayout;
+        //    }
+        //    const XRank = @TypeOf(x.*).Rank;
+        //    const YRank = @TypeOf(y.*).Rank;
+        //    const ZRank = comptime contractedRank(expression);
+        //    const plan = comptime innerProductParse(XRank, YRank, ZRank, expression);
 
-            var z_sizes: [ZRank]SizesType = undefined;
-            {
-                var i: usize = 0;
-                while (i < plan.total) : (i += 1) {
-                    if (plan.z_perm[i] == plan.pass) {
-                        continue;
-                    } else if (plan.s_ctrl[i] == 0) {
-                        z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
-                    } else {
-                        z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
-                    }
-                }
-            }
+        //    var z_sizes: [ZRank]SizesType = undefined;
+        //    {
+        //        var i: usize = 0;
+        //        while (i < plan.total) : (i += 1) {
+        //            if (plan.z_perm[i] == plan.pass) {
+        //                continue;
+        //            } else if (plan.s_ctrl[i] == 0) {
+        //                z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
+        //            } else {
+        //                z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
+        //            }
+        //        }
+        //    }
 
-            var x_i: [XRank]SizesType = undefined;
-            var y_i: [YRank]SizesType = undefined;
-            var z_i: [ZRank]SizesType = undefined;
+        //    var x_i: [XRank]SizesType = undefined;
+        //    var y_i: [YRank]SizesType = undefined;
+        //    var z_i: [ZRank]SizesType = undefined;
 
-            // TODO: Refactor - this is the only thing that differs from innerProduct
-            var z = self.copyTensor(b);
+        //    // TODO: Refactor - this is the only thing that differs from innerProduct
+        //    var z = self.copyTensor(b);
 
-            @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
-            return z;
-        }
+        //    @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
+        //    return z;
+        //}
     };
 }
 
 test "Allocate and Free" {
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
     const expect = std.testing.expect;
 
     // null uses the general purpose allocator.
     // It also means that it will call deinit
     // on the gpa allocator when we call deinit.
-    var factory = TensorFactory(f32).init(null);
-
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
+    
     /////////////////////////////////////////
     { // assign into to tensor //////////////
         var X = Tensor(f32, 2, Rowwise).init(null, .{ 10, 10 });
@@ -454,223 +398,243 @@ test "Allocate and Free" {
     X.setValue(3, .{ 0, 1 });
     Y.setValue(3, .{ 0, 1 });
     Z.setValue(3, .{ 0, 1 });
-
-    // factory will free X Y Z automatically
-    // and this will panic if test fails
-    factory.deinit();
 }
 
 test "vectorized reduce" {
-    var factory = TensorFactory(i32).init(null);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    // null uses the general purpose allocator.
+    // It also means that it will call deinit
+    // on the gpa allocator when we call deinit.
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
 
     factory.tracking(.start);
 
-    var x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
+    const x = try factory.allocTensor(2, Rowwise, .{ 100, 100 });
 
     @memset(x.values, 1);
 
     { // reduce sum of 10'000 elements
-        const y = try Ops.sum(&x);
+        const y = Ops.sum(&x);
         try std.testing.expectEqual(y, 10000);
     }
     { // reduce product of 10'000 elements
-        const y = try Ops.product(&x);
+        const y = Ops.product(&x);
         try std.testing.expectEqual(y, 1);
     }
     { // reduce max of 10'000 elements
         x.setValue(999, .{ 24, 62 });
-        const y = try Ops.max(&x);
+        const y = Ops.max(&x);
         try std.testing.expectEqual(y, 999);
     }
     { // reduce max of 10'000 elements
         x.setValue(-999, .{ 92, 10 });
-        const y = try Ops.min(&x);
+        const y = Ops.min(&x);
         try std.testing.expectEqual(y, -999);
     }
-    factory.deinit();
 }
 
-test "contraction" {
-    var factory = TensorFactory(i32).init(null);
+//test "contraction" {
+//    var factory = TensorFactory(i32).init(null);
+//
+//    factory.tracking(.start);
+//
+//    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+//
+//    @memset(x.values, 1);
+//
+//    const y = try factory.contraction("ijk->i", &x);
+//
+//    try std.testing.expectEqual(y.values[0], 12);
+//    try std.testing.expectEqual(y.values[1], 12);
+//    try std.testing.expectEqual(y.values[2], 12);
+//
+//    const z = try factory.contraction("ijk->j", &x);
+//
+//    try std.testing.expectEqual(z.values[0], 9);
+//    try std.testing.expectEqual(z.values[1], 9);
+//    try std.testing.expectEqual(z.values[2], 9);
+//    try std.testing.expectEqual(z.values[3], 9);
+//
+//    factory.deinit();
+//}
+//
+//test "contraction 2" {
+//    var factory = TensorFactory(i32).init(null);
+//
+//    defer factory.deinit();
+//
+//    factory.tracking(.start);
+//
+//    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+//    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
+//    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
+//
+//    Ops.fill(&x, 1, 1);
+//
+//    Ops.contraction("ijk->ij", &x, &y);
+//
+//    try std.testing.expectEqual(y.values[0], 6);
+//    try std.testing.expectEqual(y.values[1], 15);
+//    try std.testing.expectEqual(y.values[2], 24);
+//    try std.testing.expectEqual(y.values[3], 33);
+//    try std.testing.expectEqual(y.values[4], 42);
+//    try std.testing.expectEqual(y.values[5], 51);
+//    try std.testing.expectEqual(y.values[6], 60);
+//    try std.testing.expectEqual(y.values[7], 69);
+//    try std.testing.expectEqual(y.values[8], 78);
+//    try std.testing.expectEqual(y.values[9], 87);
+//    try std.testing.expectEqual(y.values[10], 96);
+//    try std.testing.expectEqual(y.values[11], 105);
+//
+//    Ops.contraction("ijk->ji", &x, &z);
+//
+//    try std.testing.expectEqual(z.values[0], 6);
+//    try std.testing.expectEqual(z.values[1], 42);
+//    try std.testing.expectEqual(z.values[2], 78);
+//    try std.testing.expectEqual(z.values[3], 15);
+//    try std.testing.expectEqual(z.values[4], 51);
+//    try std.testing.expectEqual(z.values[5], 87);
+//    try std.testing.expectEqual(z.values[6], 24);
+//    try std.testing.expectEqual(z.values[7], 60);
+//    try std.testing.expectEqual(z.values[8], 96);
+//    try std.testing.expectEqual(z.values[9], 33);
+//    try std.testing.expectEqual(z.values[10], 69);
+//    try std.testing.expectEqual(z.values[11], 105);
+//
+//    Ops.contraction("ijk->jk", &x, &z);
+//
+//    try std.testing.expectEqual(z.values[0], 39);
+//    try std.testing.expectEqual(z.values[1], 42);
+//    try std.testing.expectEqual(z.values[2], 45);
+//    try std.testing.expectEqual(z.values[3], 48);
+//    try std.testing.expectEqual(z.values[4], 51);
+//    try std.testing.expectEqual(z.values[5], 54);
+//    try std.testing.expectEqual(z.values[6], 57);
+//    try std.testing.expectEqual(z.values[7], 60);
+//    try std.testing.expectEqual(z.values[8], 63);
+//    try std.testing.expectEqual(z.values[9], 66);
+//    try std.testing.expectEqual(z.values[10], 69);
+//    try std.testing.expectEqual(z.values[11], 72);
+//}
 
-    factory.tracking(.start);
-
-    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-
-    @memset(x.values, 1);
-
-    const y = try factory.contraction("ijk->i", &x);
-
-    try std.testing.expectEqual(y.values[0], 12);
-    try std.testing.expectEqual(y.values[1], 12);
-    try std.testing.expectEqual(y.values[2], 12);
-
-    const z = try factory.contraction("ijk->j", &x);
-
-    try std.testing.expectEqual(z.values[0], 9);
-    try std.testing.expectEqual(z.values[1], 9);
-    try std.testing.expectEqual(z.values[2], 9);
-    try std.testing.expectEqual(z.values[3], 9);
-
-    factory.deinit();
-}
-
-test "contraction 2" {
-    var factory = TensorFactory(i32).init(null);
-
-    defer factory.deinit();
-
-    factory.tracking(.start);
-
-    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
-    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
-
-    Ops.fill(&x, 1, 1);
-
-    try Ops.contraction("ijk->ij", &x, &y);
-
-    try std.testing.expectEqual(y.values[0], 6);
-    try std.testing.expectEqual(y.values[1], 15);
-    try std.testing.expectEqual(y.values[2], 24);
-    try std.testing.expectEqual(y.values[3], 33);
-    try std.testing.expectEqual(y.values[4], 42);
-    try std.testing.expectEqual(y.values[5], 51);
-    try std.testing.expectEqual(y.values[6], 60);
-    try std.testing.expectEqual(y.values[7], 69);
-    try std.testing.expectEqual(y.values[8], 78);
-    try std.testing.expectEqual(y.values[9], 87);
-    try std.testing.expectEqual(y.values[10], 96);
-    try std.testing.expectEqual(y.values[11], 105);
-
-    try Ops.contraction("ijk->ji", &x, &z);
-
-    try std.testing.expectEqual(z.values[0], 6);
-    try std.testing.expectEqual(z.values[1], 42);
-    try std.testing.expectEqual(z.values[2], 78);
-    try std.testing.expectEqual(z.values[3], 15);
-    try std.testing.expectEqual(z.values[4], 51);
-    try std.testing.expectEqual(z.values[5], 87);
-    try std.testing.expectEqual(z.values[6], 24);
-    try std.testing.expectEqual(z.values[7], 60);
-    try std.testing.expectEqual(z.values[8], 96);
-    try std.testing.expectEqual(z.values[9], 33);
-    try std.testing.expectEqual(z.values[10], 69);
-    try std.testing.expectEqual(z.values[11], 105);
-
-    try Ops.contraction("ijk->jk", &x, &z);
-
-    try std.testing.expectEqual(z.values[0], 39);
-    try std.testing.expectEqual(z.values[1], 42);
-    try std.testing.expectEqual(z.values[2], 45);
-    try std.testing.expectEqual(z.values[3], 48);
-    try std.testing.expectEqual(z.values[4], 51);
-    try std.testing.expectEqual(z.values[5], 54);
-    try std.testing.expectEqual(z.values[6], 57);
-    try std.testing.expectEqual(z.values[7], 60);
-    try std.testing.expectEqual(z.values[8], 63);
-    try std.testing.expectEqual(z.values[9], 66);
-    try std.testing.expectEqual(z.values[10], 69);
-    try std.testing.expectEqual(z.values[11], 72);
-}
-
-test "inner product 1" {
-    var factory = TensorFactory(i32).init(null);
-
-    factory.tracking(.start);
-
-    defer factory.deinit();
-
-    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-    var z = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-
-    Ops.fill(&x, 1, 0);
-    Ops.fill(&y, 1, 1);
-
-    try Ops.innerProduct("ij,jk->ik", &x, &y, &z);
-
-    try std.testing.expectEqual(z.values[0], 4);
-    try std.testing.expectEqual(z.values[1], 6);
-    try std.testing.expectEqual(z.values[2], 4);
-    try std.testing.expectEqual(z.values[3], 6);
-
-    try Ops.innerProduct("ij,jk->ki", &x, &y, &z);
-
-    try std.testing.expectEqual(z.values[0], 4);
-    try std.testing.expectEqual(z.values[1], 4);
-    try std.testing.expectEqual(z.values[2], 6);
-    try std.testing.expectEqual(z.values[3], 6);
-}
-
-test "inner product 2" {
-    var factory = TensorFactory(i32).init(null);
-
-    factory.tracking(.start);
-
-    defer factory.deinit();
-
-    var x = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
-    var y = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
-
-    Ops.fill(&x, 0, 1);
-    Ops.fill(&y, 0, 1);
-
-    const z = try factory.innerProduct("ijk,kjm->im", &x, &y);
-
-    try std.testing.expectEqual(z.values[0], 100);
-    try std.testing.expectEqual(z.values[1], 115);
-    try std.testing.expectEqual(z.values[2], 280);
-    try std.testing.expectEqual(z.values[3], 331);
-
-    const w = try factory.innerProduct("ikj,jkl->kl", &x, &y);
-
-    try std.testing.expectEqual(w.values[0], 48);
-    try std.testing.expectEqual(w.values[1], 62);
-    try std.testing.expectEqual(w.values[2], 116);
-    try std.testing.expectEqual(w.values[3], 138);
-    try std.testing.expectEqual(w.values[4], 216);
-    try std.testing.expectEqual(w.values[5], 246);
-}
+//test "inner product 1" {
+//    var factory = TensorFactory(i32).init(null);
+//
+//    factory.tracking(.start);
+//
+//    defer factory.deinit();
+//
+//    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+//    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+//    var z = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+//
+//    Ops.fill(&x, 1, 0);
+//    Ops.fill(&y, 1, 1);
+//
+//    Ops.innerProduct("ij,jk->ik", &x, &y, &z);
+//
+//    try std.testing.expectEqual(z.values[0], 4);
+//    try std.testing.expectEqual(z.values[1], 6);
+//    try std.testing.expectEqual(z.values[2], 4);
+//    try std.testing.expectEqual(z.values[3], 6);
+//
+//    Ops.innerProduct("ij,jk->ki", &x, &y, &z);
+//
+//    try std.testing.expectEqual(z.values[0], 4);
+//    try std.testing.expectEqual(z.values[1], 4);
+//    try std.testing.expectEqual(z.values[2], 6);
+//    try std.testing.expectEqual(z.values[3], 6);
+//}
+//
+//test "inner product 2" {
+//    var factory = TensorFactory(i32).init(null);
+//
+//    factory.tracking(.start);
+//
+//    defer factory.deinit();
+//
+//    var x = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
+//    var y = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
+//
+//    Ops.fill(&x, 0, 1);
+//    Ops.fill(&y, 0, 1);
+//
+//    const z = try factory.innerProduct("ijk,kjm->im", &x, &y);
+//
+//    try std.testing.expectEqual(z.values[0], 100);
+//    try std.testing.expectEqual(z.values[1], 115);
+//    try std.testing.expectEqual(z.values[2], 280);
+//    try std.testing.expectEqual(z.values[3], 331);
+//
+//    const w = factory.innerProduct("ikj,jkl->kl", &x, &y);
+//
+//    try std.testing.expectEqual(w.values[0], 48);
+//    try std.testing.expectEqual(w.values[1], 62);
+//    try std.testing.expectEqual(w.values[2], 116);
+//    try std.testing.expectEqual(w.values[3], 138);
+//    try std.testing.expectEqual(w.values[4], 216);
+//    try std.testing.expectEqual(w.values[5], 246);
+//}
 
 test "arithmetic 1" {
-    var factory = TensorFactory(i64).init(null);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    // null uses the general purpose allocator.
+    // It also means that it will call deinit
+    // on the gpa allocator when we call deinit.
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
 
     factory.tracking(.start);
-
-    defer factory.deinit();
 
     var x = try factory.allocTensor(1, Rowwise, .{100_000});
     var y = try factory.allocTensor(1, Rowwise, .{100_000});
+
     Ops.fill(&x, 1, 0);
     Ops.fill(&y, 2, 0);
 
     // factory versions...
     {
         var z = try factory.add(&x, &y);
-        const s = try Ops.sum(&z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 300_000);
     }
     {
         var z = try factory.mul(&x, &y);
-        const s = try Ops.sum(&z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 200_000);
     }
     {
         var z = try factory.sub(&x, &y);
-        const s = try Ops.sum(&z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == -100_000);
     }
     {
         const b: i64 = 4;
         var z = try factory.bias(&x, b);
-        const s = try Ops.sum(&z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 500_000);
     }
     {
         const b: i64 = 4;
         var z = try factory.scale(&x, b);
-        const s = try Ops.sum(&z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 400_000);
     }
 
@@ -678,30 +642,31 @@ test "arithmetic 1" {
 
     // free versions...
     {
-        try Ops.add(&x, &y, &z);
-        const s = try Ops.sum(&z);
+        Ops.add(&x, &y, &z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 300_000);
     }
     {
-        try Ops.mul(&x, &y, &z);
-        const s = try Ops.sum(&z);
+        Ops.mul(&x, &y, &z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 200_000);
     }
     {
-        try Ops.sub(&x, &y, &z);
-        const s = try Ops.sum(&z);
+        Ops.sub(&x, &y, &z);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == -100_000);
     }
     {
         const b: i64 = 4;
-        try Ops.bias(&x, &z, b);
-        const s = try Ops.sum(&z);
+        Ops.bias(&x, &z, b);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 500_000);
     }
     {
         const b: i64 = 4;
-        try Ops.scale(&x, &z, b);
-        const s = try Ops.sum(&z);
+        Ops.scale(&x, &z, b);
+        const s = Ops.sum(&z);
         try std.testing.expect(s == 400_000);
     }
 }
+

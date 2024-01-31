@@ -36,6 +36,10 @@
 // focused on integer and floating point numbers. User provided types will have to
 // be reviewed as time goes forward.
 
+const std = @import("std");
+
+const Util = @import("utility.zig");
+
 // STD import files...
 const ReduceOp = @import("std").builtin.ReduceOp;
 
@@ -55,8 +59,8 @@ pub const TensorError = error{ InvalidTensorLayout, InvalidPermutation, AllocSiz
 pub inline fn computeTensorIndex(
     comptime rank: usize, 
     comptime size_type: type, 
-    strides: []size_type, 
-    indices: []size_type
+    strides: []const size_type, 
+    indices: []const size_type
 ) size_type {
     return switch(rank) {
         1 => indices[0], // direct index... just an array
@@ -134,158 +138,68 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
         pub fn valueCapacity(self: ConstSelfPtr) usize {
             return arrayProduct(Rank, SizesType, &self.sizes_and_strides.sizes);
         }
+
         pub fn valueSize(self: ConstSelfPtr) usize {
             return self.values.len;
         }
-
-        // This is a critical function that users should call
-        // before using their tensor for operations. This check
-        // ensures that the sizes and strides will enable them
-        // to properly access all of the memory within their
-        // tensor and not step overbounds with proper indexing.
-
-        // Default "checked" functions will call this implicity,
-        // but please understand that the getValue and setValue
-        // do not call this. There is a lengthy comment about
-        // that above them - suffice to say, use this check before
-        // indexing into your tensor!
 
         pub fn isValid(self: ConstSelfPtr) bool {
             return self.valueSize() != 0 and self.valueSize() == self.valueCapacity();
         }
 
-        /////////////////////////////////////////
-        // Unchecked Functions Implementations //
-
-        // I understand that these functions are verbose,
-        // but they are meant to communicate to the user
-        // that an operation they are about to do could
-        // invalidate a tensor in some way.
-
-        // to use this function safely, check that both tensor value
-        // sizes are the same and that both tensors are at capacity
-        pub fn swapValuesUnchecked(self: SelfPtr, other: SelfPtr) void {
-            const values = self.values;
-            const index = self.alloc_index;
-
-            // assign values and index from other
-            self.values = other.values;
-            self.alloc_index = other.alloc_index;
-
-            // assign values and index to other
-            other.values = values;
-            other.alloc_index = index;
+        pub fn swap(self: SelfPtr, other: SelfPtr) void {
+            self.swapValues(other);
+            self.swapSizesAndStrides(other);
         }
 
-        // to use this function safely, check that the both tensors are at capacity
-        pub fn swapSizesAndStridesUnchecked(self: SelfPtr, other: SelfPtr) void {
+        pub fn swapValues(self: SelfPtr, other: SelfPtr) void {
+            // to assure that sizes and strides are not
+            // invalidated, we check size and capacity
+            std.debug.assert(self.valueSize() == other.valueSize());
+            std.debug.assert(self.isValid() and other.isValid());
+
+            const values = self.values;
+            self.values = other.values;
+            other.values = values;
+        }
+
+        pub fn swapSizesAndStrides(self: SelfPtr, other: SelfPtr) void {
+            // we only want to compute these once...
+
+            if (comptime Util.debug) {
+                const capacity_a = self.valueCapacity();
+                const capacity_b = other.valueCapacity();
+                // tensors can have different SizesAndStrides
+                // and still share the total value capcity
+                std.debug.assert(capacity_a == capacity_b);
+                // check that both tensors are at capacity without additional computation
+                std.debug.assert(
+                    self.valueSize() == capacity_a and other.valueSize() == capacity_b
+                );
+            }
+
             // there is probably a faster way to do this
             const tmp = self.sizes_and_strides;
             self.sizes_and_strides = other.sizes_and_strides;
             other.sizes_and_strides = tmp;
         }
 
-        // to use this function safely, check that both tensors are at capacity
-        pub fn swapUnchecked(self: SelfPtr, other: SelfPtr) void {
-            self.swapValuesUnchecked(other);
-            self.swapSizesAndStridesUnchecked(other);
-        }
+        pub fn permutate(self: SelfPtr, comptime expression: []const u8) Self {
+            // create a permutated tensor that shares the same underlying memory
+            std.debug.assert(self.isValid());
 
-        // to use this function safely, check that the source is
-        // valid to ensure that the resulting tensor is also valid.
-        pub fn permutateUnchecked(self: SelfPtr, comptime expression: []const u8) Self {
-            var tmp = self.*; // share values and alloc_index!
+            var tmp = self.*; // share values
             Permutate.permutate(Rank, Order, expression, &tmp.sizes_and_strides);
             return tmp;
         }
 
-        ///////////////////////////////////////
-        // Checked Functions Implementations //
-
-        // Checked functions only succeed if their guard clauses
-        // are true. Otherwise, they return errors and do not
-        // perform the operation. This is to prevent leaving
-        // tensors in an invalid state after the operation.
-
-        pub fn swapValues(self: SelfPtr, other: SelfPtr) !void {
-            // to assure that sizes and strides are not
-            // invalidated, we check size and capacity
-            if (self.valueSize() != other.valueSize()) {
-                return TensorError.AllocSizeMismatch;
-            }
-            if (!self.isValid() or !other.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            self.swapValuesUnchecked(other);
-        }
-
-        pub fn swapSizesAndStrides(self: SelfPtr, other: SelfPtr) !void {
-            // we only want to compute these once...
-            const capacity_a = self.valueCapactiy();
-            const capacity_b = other.valueCapactiy();
-
-            // tensors can have different SizesAndStrides
-            // and still share the total value capcity
-            if (capacity_a != capacity_b) {
-                return TensorError.CapacityMismatch;
-            }
-            // check that both tensors are at capacity without additional computation
-            if (self.valueSize() != capacity_a or other.valueSize() != capacity_b) {
-                return TensorError.InvalidTensorLayout;
-            }
-            self.swapSizesAndStridesUnchecked(other);
-        }
-
-        pub fn swap(self: SelfPtr, other: SelfPtr) !void {
-            // Two tensors do not need to be the same size to be swapped.
-            // They only need to both be valid tensors to prevent invalidation.
-            if (!self.isValid() or !other.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            self.swapUnchecked(other);
-        }
-
-        pub fn permutate(self: SelfPtr, comptime expression: []const u8) !Self {
-            // create a permutated tensor that shares the same underlying memory
-            if (!self.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
-            return self.permutateUnchecked(expression);
-        }
-
-        /////////////////////////////////////////////////
-        // !!! Value Getter and Setters are UNCHECKED !!!
-
-        // I debated with myself about having a Unchecked/Default version of
-        // these functions, but I can't justify the cost. Here's why...
-        // it is too cumbersome to put a "try" infront of these and will
-        // cause tensor expressions to be extremely awkward.
-
-        // I have rarely seen C++ implementations of tensors that use
-        // the std::vector::at function (which is range checked). Instead,
-        // almost everyone opts for the std::vector::operator[].
-        // This is because it's natural to write x[0] + y[0].
-
-        // Also, we could check *all kinds of things* here. For instance,
-        // are you at capacity? Even if you're not, you could have your
-        // strides zeroed out and a value.len == 0. Should we test for
-        // that too? Then, we could test that you are within range
-        // and that means each index is valid for each size axis. This is
-        // simply untenable. In practice, what that means is that everyone
-        // will just use the unchecked function call instead (I know I would).
-
-        // Due to this, it is critical that the user takes the (very common)
-        // burden of checking that their indices are within range. Atop that,
-        // the user should also call isValid before using their tensors
-        // to ensure that everything lines up before using a tensor to be
-        // certain that they are doing valid indexing.
         pub fn getValue(self: ConstSelfPtr, indices: [rank]SizesType) ValueType {
-            const n = computeTensorIndex(Rank, SizesType, &self.sizes_and_strides.strides, indices);
+            const n = computeTensorIndex(Rank, SizesType, self.getStrides(), &indices);
             return self.values[n];
         }
 
         pub fn setValue(self: ConstSelfPtr, value: ValueType, indices: [rank]SizesType) void {
-            const n = computeTensorIndex(Rank, SizesType, &self.sizes_and_strides.strides, indices);
+            const n = computeTensorIndex(Rank, SizesType, self.getStrides(), &indices);
             self.values[n] = value;
         }
 
@@ -300,7 +214,7 @@ pub fn Tensor(comptime value_type: type, comptime rank: usize, comptime order: O
 }
 
 test "Initialization" {
-    const expect = @import("std").testing.expect;
+    const expect = std.testing.expect;
 
     var x = Tensor(u32, 3, Rowwise).init(null, .{ 10, 20, 30 });
 
@@ -309,8 +223,31 @@ test "Initialization" {
     try expect(total == x.valueCapacity());
 }
 
+test "Tensor Swapping" {
+    const expect = std.testing.expect;
+
+    const x_values = try std.heap.page_allocator.alloc(i8, 100);
+    defer std.heap.page_allocator.free(x_values);
+
+    const y_values = try std.heap.page_allocator.alloc(i8, 100);
+    defer std.heap.page_allocator.free(y_values);
+
+    var x = Tensor(i8, 2, Rowwise).init(x_values, .{ 10, 10 });
+    var y = Tensor(i8, 2, Rowwise).init(y_values, .{ 10, 10 });
+
+    x.swap(&y);
+
+    try expect(x.values.ptr == y_values.ptr);
+    try expect(y.values.ptr == x_values.ptr);
+
+    const total: usize = 10 * 10;
+
+    try expect(total == x.valueCapacity());
+    try expect(total == y.valueCapacity());
+}
+
 test "Tensor Transpose" {
-    const expect = @import("std").testing.expect;
+    const expect = std.testing.expect;
 
     var data = [9]i32{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
 
@@ -328,7 +265,7 @@ test "Tensor Transpose" {
     try expect(x.getValue(.{ 2, 1 }) == 8);
     try expect(x.getValue(.{ 2, 2 }) == 9);
 
-    var y = try x.permutate("ij->ji");
+    var y = x.permutate("ij->ji");
 
     try expect(y.getValue(.{ 0, 0 }) == 1);
     try expect(y.getValue(.{ 0, 1 }) == 4);
