@@ -21,8 +21,10 @@ const x = X.getValue(.{0, 2}); // access value 3...
 The TensorFactory offers the ability to track and free allocations:
 
 ```zig
-// null will automatically use the GPA allocator:
-var factory = zein.TensorFactory(f32).init(null);
+var factory = zein.TensorFactory(f32).init(.{
+  .system_allocator = your_allocator, // for TensorFactory components
+  .tensor_allocator = your_allocator, // for TensorFactory value data
+});
 
 // Begin tracking tensor allocations (default is no-tracking):
 factory.tracking(.start);
@@ -60,27 +62,27 @@ The operations use compile time strings as einsum notation:
 
 ```zig
 // Collapse tensor values using contraction:
-try zein.contraction("ijk->ji", &x, &y); // free function - assign to existing memory
+zein.contraction("ijk->ji", &x, &y); // free function - assign to existing memory
 var y = factory.contraction("ijk->ji", &x); // factory function - allocate new memory
 ```
 
 ```zig
 // Elementary binary functions (add, multiply):
-try zein.add(&x, &y, &z); // free function - assign to existing memory
+zein.add(&x, &y, &z); // free function - assign to existing memory
 var x = factory.add(&x, &y); // factory function - allocate new memory
 ```
 
 ```zig
 // Transpose/permutate tensor views (does not modify underlying data).
-var y = try x.permutate("ijk->kji");
+var y = x.permutate("ijk->kji");
 ```
 
 ```zig
 // Elementary vectorized reduction functions (sum, product, min, max):
-const a = try zein.sum(&x);
-const b = try zein.product(&x);
-const c = try zein.max(&x);
-const d = try zein.min(&x);
+const a = zein.sum(&x);
+const b = zein.product(&x);
+const c = zein.max(&x);
+const d = zein.min(&x);
 ```
 
 ## Using the Zein library
