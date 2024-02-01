@@ -233,37 +233,34 @@ pub fn TensorFactory(comptime value_type: type) type {
             return y;
         }
 
-        //pub fn contraction(self: SelfPtr, comptime expression: []const u8, x: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-        //    if (!x.isValid()) {
-        //        return TensorError.InvalidTensorLayout;
-        //    }
-        //    const XRank = @TypeOf(x.*).Rank;
-        //    const YRank = comptime contractedRank(expression);
+        pub fn contraction(self: SelfPtr, comptime expression: []const u8, x: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
+            std.debug.assert(x.isValid());
 
-        //    const ip = comptime contractionParse(XRank, YRank, expression);
+            const XRank = @TypeOf(x.*).Rank;
+            const YRank = comptime contractedRank(expression);
+            const ip = comptime contractionParse(XRank, YRank, expression);
 
-        //    var y_ss: [YRank]SizesType = undefined;
-        //    {
-        //        var i: usize = 0;
-        //        while (i < YRank) : (i += 1) {
-        //            y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
-        //        }
-        //    }
-        //    var y = try self.allocTensor(YRank, @TypeOf(x.*).Order, y_ss);
+            var y_ss: [YRank]SizesType = undefined;
+            {
+                var i: usize = 0;
+                while (i < YRank) : (i += 1) {
+                    y_ss[i] = x.sizes_and_strides.sizes[ip.lhs[i]];
+                }
+            }
+            var y = try self.allocTensor(YRank, @TypeOf(x.*).Order, y_ss);
 
-        //    var xc: [XRank]SizesType = undefined;
-        //    var yc: [YRank]SizesType = undefined;
+            var xc: [XRank]SizesType = undefined;
+            var yc: [YRank]SizesType = undefined;
 
-        //    @memset(y.values, 0);
+            @memset(y.values, 0);
 
-        //    @call(.always_inline, Ops.recursiveContraction, .{ ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc });
-        //    return y;
-        //}
+            @call(.always_inline, Ops.recursiveContraction, .{ ValueType, SizesType, XRank, YRank, ip.lhs, ip.rhs, 0, x, &y, &xc, &yc });
+            return y;
+        }
 
         pub fn innerProduct(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-            if (!x.isValid() or !y.isValid()) {
-                return TensorError.InvalidTensorLayout;
-            }
+            std.debug.assert(x.isValid() and y.isValid());
+
             const XRank = @TypeOf(x.*).Rank;
             const YRank = @TypeOf(y.*).Rank;
             const ZRank = comptime contractedRank(expression);
@@ -285,46 +282,16 @@ pub fn TensorFactory(comptime value_type: type) type {
 
             var z = try self.allocTensor(ZRank, @TypeOf(x.*).Order, z_sizes);
 
-            // TODO: Refactor - this is the only thing that differs from linear.
+            var x_i: [XRank]SizesType = undefined;
+            var y_i: [YRank]SizesType = undefined;
+            var z_i: [ZRank]SizesType = undefined;
+
             @memset(z.values, 0);
 
-            Ops.innerProduct(plan, x, y, &z);
+            @call(.always_inline, Ops.recursiveInnerProduct, .{ @TypeOf(x.*).ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
+
             return z;
         }
-
-        //pub fn linear(self: SelfPtr, comptime expression: []const u8, x: anytype, y: anytype, b: anytype) !Tensor(ValueType, contractedRank(expression), @TypeOf(x.*).Order) {
-        //    if (!x.isValid() or !y.isValid()) {
-        //        return TensorError.InvalidTensorLayout;
-        //    }
-        //    const XRank = @TypeOf(x.*).Rank;
-        //    const YRank = @TypeOf(y.*).Rank;
-        //    const ZRank = comptime contractedRank(expression);
-        //    const plan = comptime innerProductParse(XRank, YRank, ZRank, expression);
-
-        //    var z_sizes: [ZRank]SizesType = undefined;
-        //    {
-        //        var i: usize = 0;
-        //        while (i < plan.total) : (i += 1) {
-        //            if (plan.z_perm[i] == plan.pass) {
-        //                continue;
-        //            } else if (plan.s_ctrl[i] == 0) {
-        //                z_sizes[plan.z_perm[i]] = x.getSize(plan.x_perm[i]);
-        //            } else {
-        //                z_sizes[plan.z_perm[i]] = y.getSize(plan.y_perm[i]);
-        //            }
-        //        }
-        //    }
-
-        //    var x_i: [XRank]SizesType = undefined;
-        //    var y_i: [YRank]SizesType = undefined;
-        //    var z_i: [ZRank]SizesType = undefined;
-
-        //    // TODO: Refactor - this is the only thing that differs from innerProduct
-        //    var z = self.copyTensor(b);
-
-        //    @call(.always_inline, Ops.recursiveInnerProduct, .{ ValueType, SizesType, 0, plan, x, y, &z, &x_i, &y_i, &z_i });
-        //    return z;
-        //}
     };
 }
 
@@ -333,10 +300,7 @@ test "Allocate and Free" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     const expect = std.testing.expect;
-
-    // null uses the general purpose allocator.
-    // It also means that it will call deinit
-    // on the gpa allocator when we call deinit.
+    
     var factory = TensorFactory(f32).init(.{
         .system_allocator = gpa.allocator(),
         .tensor_allocator = gpa.allocator(),
@@ -403,9 +367,6 @@ test "Allocate and Free" {
 test "vectorized reduce" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    // null uses the general purpose allocator.
-    // It also means that it will call deinit
-    // on the gpa allocator when we call deinit.
     var factory = TensorFactory(f32).init(.{
         .system_allocator = gpa.allocator(),
         .tensor_allocator = gpa.allocator(),
@@ -442,148 +403,181 @@ test "vectorized reduce" {
     }
 }
 
-//test "contraction" {
-//    var factory = TensorFactory(i32).init(null);
-//
-//    factory.tracking(.start);
-//
-//    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-//
-//    @memset(x.values, 1);
-//
-//    const y = try factory.contraction("ijk->i", &x);
-//
-//    try std.testing.expectEqual(y.values[0], 12);
-//    try std.testing.expectEqual(y.values[1], 12);
-//    try std.testing.expectEqual(y.values[2], 12);
-//
-//    const z = try factory.contraction("ijk->j", &x);
-//
-//    try std.testing.expectEqual(z.values[0], 9);
-//    try std.testing.expectEqual(z.values[1], 9);
-//    try std.testing.expectEqual(z.values[2], 9);
-//    try std.testing.expectEqual(z.values[3], 9);
-//
-//    factory.deinit();
-//}
-//
-//test "contraction 2" {
-//    var factory = TensorFactory(i32).init(null);
-//
-//    defer factory.deinit();
-//
-//    factory.tracking(.start);
-//
-//    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
-//    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
-//    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
-//
-//    Ops.fill(&x, 1, 1);
-//
-//    Ops.contraction("ijk->ij", &x, &y);
-//
-//    try std.testing.expectEqual(y.values[0], 6);
-//    try std.testing.expectEqual(y.values[1], 15);
-//    try std.testing.expectEqual(y.values[2], 24);
-//    try std.testing.expectEqual(y.values[3], 33);
-//    try std.testing.expectEqual(y.values[4], 42);
-//    try std.testing.expectEqual(y.values[5], 51);
-//    try std.testing.expectEqual(y.values[6], 60);
-//    try std.testing.expectEqual(y.values[7], 69);
-//    try std.testing.expectEqual(y.values[8], 78);
-//    try std.testing.expectEqual(y.values[9], 87);
-//    try std.testing.expectEqual(y.values[10], 96);
-//    try std.testing.expectEqual(y.values[11], 105);
-//
-//    Ops.contraction("ijk->ji", &x, &z);
-//
-//    try std.testing.expectEqual(z.values[0], 6);
-//    try std.testing.expectEqual(z.values[1], 42);
-//    try std.testing.expectEqual(z.values[2], 78);
-//    try std.testing.expectEqual(z.values[3], 15);
-//    try std.testing.expectEqual(z.values[4], 51);
-//    try std.testing.expectEqual(z.values[5], 87);
-//    try std.testing.expectEqual(z.values[6], 24);
-//    try std.testing.expectEqual(z.values[7], 60);
-//    try std.testing.expectEqual(z.values[8], 96);
-//    try std.testing.expectEqual(z.values[9], 33);
-//    try std.testing.expectEqual(z.values[10], 69);
-//    try std.testing.expectEqual(z.values[11], 105);
-//
-//    Ops.contraction("ijk->jk", &x, &z);
-//
-//    try std.testing.expectEqual(z.values[0], 39);
-//    try std.testing.expectEqual(z.values[1], 42);
-//    try std.testing.expectEqual(z.values[2], 45);
-//    try std.testing.expectEqual(z.values[3], 48);
-//    try std.testing.expectEqual(z.values[4], 51);
-//    try std.testing.expectEqual(z.values[5], 54);
-//    try std.testing.expectEqual(z.values[6], 57);
-//    try std.testing.expectEqual(z.values[7], 60);
-//    try std.testing.expectEqual(z.values[8], 63);
-//    try std.testing.expectEqual(z.values[9], 66);
-//    try std.testing.expectEqual(z.values[10], 69);
-//    try std.testing.expectEqual(z.values[11], 72);
-//}
+test "contraction" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-//test "inner product 1" {
-//    var factory = TensorFactory(i32).init(null);
-//
-//    factory.tracking(.start);
-//
-//    defer factory.deinit();
-//
-//    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-//    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-//    var z = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
-//
-//    Ops.fill(&x, 1, 0);
-//    Ops.fill(&y, 1, 1);
-//
-//    Ops.innerProduct("ij,jk->ik", &x, &y, &z);
-//
-//    try std.testing.expectEqual(z.values[0], 4);
-//    try std.testing.expectEqual(z.values[1], 6);
-//    try std.testing.expectEqual(z.values[2], 4);
-//    try std.testing.expectEqual(z.values[3], 6);
-//
-//    Ops.innerProduct("ij,jk->ki", &x, &y, &z);
-//
-//    try std.testing.expectEqual(z.values[0], 4);
-//    try std.testing.expectEqual(z.values[1], 4);
-//    try std.testing.expectEqual(z.values[2], 6);
-//    try std.testing.expectEqual(z.values[3], 6);
-//}
-//
-//test "inner product 2" {
-//    var factory = TensorFactory(i32).init(null);
-//
-//    factory.tracking(.start);
-//
-//    defer factory.deinit();
-//
-//    var x = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
-//    var y = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
-//
-//    Ops.fill(&x, 0, 1);
-//    Ops.fill(&y, 0, 1);
-//
-//    const z = try factory.innerProduct("ijk,kjm->im", &x, &y);
-//
-//    try std.testing.expectEqual(z.values[0], 100);
-//    try std.testing.expectEqual(z.values[1], 115);
-//    try std.testing.expectEqual(z.values[2], 280);
-//    try std.testing.expectEqual(z.values[3], 331);
-//
-//    const w = factory.innerProduct("ikj,jkl->kl", &x, &y);
-//
-//    try std.testing.expectEqual(w.values[0], 48);
-//    try std.testing.expectEqual(w.values[1], 62);
-//    try std.testing.expectEqual(w.values[2], 116);
-//    try std.testing.expectEqual(w.values[3], 138);
-//    try std.testing.expectEqual(w.values[4], 216);
-//    try std.testing.expectEqual(w.values[5], 246);
-//}
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+
+    @memset(x.values, 1);
+
+    const y = try factory.contraction("ijk->i", &x);
+
+    try std.testing.expectEqual(y.values[0], 12);
+    try std.testing.expectEqual(y.values[1], 12);
+    try std.testing.expectEqual(y.values[2], 12);
+
+    const z = try factory.contraction("ijk->j", &x);
+
+    try std.testing.expectEqual(z.values[0], 9);
+    try std.testing.expectEqual(z.values[1], 9);
+    try std.testing.expectEqual(z.values[2], 9);
+    try std.testing.expectEqual(z.values[3], 9);
+}
+
+test "contraction 2" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 3, 4, 3 });
+    var y = try factory.allocTensor(2, Rowwise, .{ 3, 4 });
+    var z = try factory.allocTensor(2, Rowwise, .{ 4, 3 });
+
+    Ops.fill(&x, 1, 1);
+
+    Ops.contraction("ijk->ij", &x, &y);
+
+    try std.testing.expectEqual(y.values[0], 6);
+    try std.testing.expectEqual(y.values[1], 15);
+    try std.testing.expectEqual(y.values[2], 24);
+    try std.testing.expectEqual(y.values[3], 33);
+    try std.testing.expectEqual(y.values[4], 42);
+    try std.testing.expectEqual(y.values[5], 51);
+    try std.testing.expectEqual(y.values[6], 60);
+    try std.testing.expectEqual(y.values[7], 69);
+    try std.testing.expectEqual(y.values[8], 78);
+    try std.testing.expectEqual(y.values[9], 87);
+    try std.testing.expectEqual(y.values[10], 96);
+    try std.testing.expectEqual(y.values[11], 105);
+
+    Ops.contraction("ijk->ji", &x, &z);
+
+    try std.testing.expectEqual(z.values[0], 6);
+    try std.testing.expectEqual(z.values[1], 42);
+    try std.testing.expectEqual(z.values[2], 78);
+    try std.testing.expectEqual(z.values[3], 15);
+    try std.testing.expectEqual(z.values[4], 51);
+    try std.testing.expectEqual(z.values[5], 87);
+    try std.testing.expectEqual(z.values[6], 24);
+    try std.testing.expectEqual(z.values[7], 60);
+    try std.testing.expectEqual(z.values[8], 96);
+    try std.testing.expectEqual(z.values[9], 33);
+    try std.testing.expectEqual(z.values[10], 69);
+    try std.testing.expectEqual(z.values[11], 105);
+
+    Ops.contraction("ijk->jk", &x, &z);
+
+    try std.testing.expectEqual(z.values[0], 39);
+    try std.testing.expectEqual(z.values[1], 42);
+    try std.testing.expectEqual(z.values[2], 45);
+    try std.testing.expectEqual(z.values[3], 48);
+    try std.testing.expectEqual(z.values[4], 51);
+    try std.testing.expectEqual(z.values[5], 54);
+    try std.testing.expectEqual(z.values[6], 57);
+    try std.testing.expectEqual(z.values[7], 60);
+    try std.testing.expectEqual(z.values[8], 63);
+    try std.testing.expectEqual(z.values[9], 66);
+    try std.testing.expectEqual(z.values[10], 69);
+    try std.testing.expectEqual(z.values[11], 72);
+}
+
+test "inner product 1" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
+
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var y = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+    var z = try factory.allocTensor(2, Rowwise, .{ 2, 2 });
+
+    Ops.fill(&x, 1, 0);
+    Ops.fill(&y, 1, 1);
+
+    Ops.innerProduct("ij,jk->ik", &x, &y, &z);
+
+    try std.testing.expectEqual(z.values[0], 4);
+    try std.testing.expectEqual(z.values[1], 6);
+    try std.testing.expectEqual(z.values[2], 4);
+    try std.testing.expectEqual(z.values[3], 6);
+
+    Ops.innerProduct("ij,jk->ki", &x, &y, &z);
+
+    try std.testing.expectEqual(z.values[0], 4);
+    try std.testing.expectEqual(z.values[1], 4);
+    try std.testing.expectEqual(z.values[2], 6);
+    try std.testing.expectEqual(z.values[3], 6);
+}
+
+test "inner product 2" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    var factory = TensorFactory(f32).init(.{
+        .system_allocator = gpa.allocator(),
+        .tensor_allocator = gpa.allocator(),
+    });
+    
+    defer {
+        factory.deinit();
+        if (gpa.deinit() == .leak) @panic("!!! LEAK DETECTED !!!");
+    }
+
+    factory.tracking(.start);
+
+    var x = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
+    var y = try factory.allocTensor(3, Rowwise, .{ 2, 3, 2 });
+
+    Ops.fill(&x, 0, 1);
+    Ops.fill(&y, 0, 1);
+
+    const z = try factory.innerProduct("ijk,kjm->im", &x, &y);
+
+    try std.testing.expectEqual(z.values[0], 100);
+    try std.testing.expectEqual(z.values[1], 115);
+    try std.testing.expectEqual(z.values[2], 280);
+    try std.testing.expectEqual(z.values[3], 331);
+
+    const w = try factory.innerProduct("ikj,jkl->kl", &x, &y);
+
+    try std.testing.expectEqual(w.values[0], 48);
+    try std.testing.expectEqual(w.values[1], 62);
+    try std.testing.expectEqual(w.values[2], 116);
+    try std.testing.expectEqual(w.values[3], 138);
+    try std.testing.expectEqual(w.values[4], 216);
+    try std.testing.expectEqual(w.values[5], 246);
+}
 
 test "arithmetic 1" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

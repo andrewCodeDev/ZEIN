@@ -176,6 +176,7 @@ pub fn unquantize(x: anytype, y: anytype, s: @TypeOf(y.*).ValueType) void {
     }
 }
 
+
 /////////////////////////////////////////////////////////////
 // This is the naive version of a general tensor permutation.
 // In the future, I plan on making more optimal versions of
@@ -255,147 +256,179 @@ pub fn contraction(comptime expression: []const u8, x: anytype, y: anytype) void
     const YT = @TypeOf(y.*);
     const ip = comptime contractionParse(XT.Rank, YT.Rank, expression);
 
-    if (comptime Util.debug) {    
-
-        for (0..YT.Rank) |i| {
-            std.debug.assert(x.getSize(ip.lhs[i]) == y.getSize(ip.rhs[i]));
+    if (comptime Util.debug) {
+        const xs = x.getSizes();
+        const ys = y.getSizes();
+        var i: usize = 1;
+        while (i < YT.Rank) : (i += 1) {
+            std.debug.assert(xs[ip.lhs[i]] == ys[ip.rhs[i]]);
         }
     }
+    var xc: [XT.Rank]XT.SizesType = undefined;
+    var yc: [YT.Rank]YT.SizesType = undefined;
 
-    // TODO: @memset assumes host device memory...
     @memset(y.values, 0);
 
-    unreachable; // TODO
+    @call(.always_inline, recursiveContraction, .{ XT.ValueType, XT.SizesType, XT.Rank, YT.Rank, ip.lhs, ip.rhs, 0, x, y, &xc, &yc });
 }
 
-//pub inline fn recursiveContraction(
-//    comptime VT: type, // value type
-//    comptime XR: usize, // tensor x rank
-//    comptime YR: usize, // tensor y rank
-//    comptime I: usize, // starting index
-//    x: anytype, // source tensor
-//    y: anytype, // destination memory
-//    xc: []SizeType, // index container
-//    yc: []SizeType, // index container
-//) void {
-    //if (XR <= YR) {
-    //    @compileError("Contraction must go from a larger tensor to a smaller one.");
-    //}
+pub inline fn recursiveContraction(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime XR: usize, // tensor x rank
+    comptime YR: usize, // tensor y rank
+    comptime xp: [XR]IT, // x permutation
+    comptime yp: [YR]IT, // y permutation
+    comptime I: usize, // starting index
+    x: anytype, // source tensor
+    y: anytype, // destination memory
+    xc: *[XR]IT, // index container
+    yc: *[YR]IT, // index container
+) void {
+    if (XR <= YR) {
+        @compileError("Contraction must go from a larger tensor to a smaller one.");
+    }
 
-    //if (I < YR) {
-    //    const x_perm_index = xp[I];
-    //    const y_perm_index = yp[I];
+    if (I < YR) {
+        const x_perm_index = xp[I];
+        const y_perm_index = yp[I];
 
-    //    // this first branch loads up the x and y indices
-    //    // and passes them to the next loop. In this case,
-    //    // I is still in bounds of both x and y ranks.
+        // this first branch loads up the x and y indices
+        // and passes them to the next loop. In this case,
+        // I is still in bounds of both x and y ranks.
 
-    //    var i: IT = 0;
-    //    while (i < x.getSize(x_perm_index)) : (i += 1) {
-    //        xc[x_perm_index] = i;
-    //        yc[y_perm_index] = i;
+        var i: IT = 0;
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
+            yc[y_perm_index] = i;
 
-    //        @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
-    //    }
-    //} else if ((YR <= I) and (I < (XR - 1))) {
+            @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
+        }
+    } else if ((YR <= I) and (I < (XR - 1))) {
 
-    //    // the second branch deals with values of I that are
-    //    // out-of-bounds for y rank, but still in-bounds for
-    //    // the x rank.
+        // the second branch deals with values of I that are
+        // out-of-bounds for y rank, but still in-bounds for
+        // the x rank.
 
-    //    const x_perm_index = xp[I];
+        const x_perm_index = xp[I];
 
-    //    var i: IT = 0;
-    //    while (i < x.getSize(x_perm_index)) : (i += 1) {
-    //        xc[x_perm_index] = i;
+        var i: IT = 0;
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
 
-    //        @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
-    //    }
-    //} else {
+            @call(.always_inline, recursiveContraction, .{ VT, IT, XR, YR, xp, yp, (I + 1), x, y, xc, yc });
+        }
+    } else {
 
-    //    // the third branch deals with summing up the contracted
-    //    // indices and writing them to the related y index
+        // the third branch deals with summing up the contracted
+        // indices and writing them to the related y index
 
-    //    const x_ss: @Vector(XR, IT) = x.*.sizes_and_strides.strides;
+        const x_ss: @Vector(XR, IT) = x.*.sizes_and_strides.strides;
 
-    //    const x_perm_index = xp[I];
+        const x_perm_index = xp[I];
 
-    //    var i: IT = 0;
-    //    var t: VT = 0;
-    //    while (i < x.getSize(x_perm_index)) : (i += 1) {
-    //        xc[x_perm_index] = i;
-    //        const x_c: @Vector(XR, IT) = xc.*;
-    //        const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
-    //        t += x.values[x_i]; // accumulate summations
-    //    }
-    //    const y_ss: @Vector(YR, IT) = y.sizes_and_strides.strides;
-    //    const y_c: @Vector(YR, IT) = yc.*;
-    //    const y_i = @reduce(ReduceOp.Add, y_c * y_ss);
-    //    y.*.values[y_i] += t;
-    //}
-//}
+        var i: IT = 0;
+        var t: VT = 0;
+        while (i < x.getSize(x_perm_index)) : (i += 1) {
+            xc[x_perm_index] = i;
+            const x_c: @Vector(XR, IT) = xc.*;
+            const x_i = @reduce(ReduceOp.Add, x_c * x_ss);
+            t += x.values[x_i]; // accumulate summations
+        }
+        const y_ss: @Vector(YR, IT) = y.sizes_and_strides.strides;
+        const y_c: @Vector(YR, IT) = yc.*;
+        const y_i = @reduce(ReduceOp.Add, y_c * y_ss);
+        y.*.values[y_i] += t;
+    }
+}
 
 // <>--------------------------------------------------------<>
 
 // TODO: Add explanation for this crazy thing...
 
 pub fn innerProduct(comptime expression: []const u8, x: anytype, y: anytype, z: anytype) void {
-    std.debug.assert(!x.isValid() or !y.isValid() or !z.isValid());        
+    std.debug.assert(x.isValid() and y.isValid() and z.isValid());
 
-    const plan = comptime innerProductParse(
-        @TypeOf(x.*).Rank, @TypeOf(y.*).Rank, @TypeOf(z.*).Rank, expression
-    );
+    const XT = @TypeOf(x.*);
+    const YT = @TypeOf(y.*);
+    const ZT = @TypeOf(z.*);
+
+    const plan = comptime innerProductParse(XT.Rank, YT.Rank, ZT.Rank, expression);
 
     if (comptime Util.debug) {
         for (0..plan.total) |i| {
             if (plan.x_perm[i] != plan.pass and plan.y_perm[i] != plan.pass) {
-                std.debug.assert(x.getSize(plan.x_perm[i]) != y.getSize(plan.y_perm[i]));
+                std.debug.assert(x.getSize(plan.x_perm[i]) == y.getSize(plan.y_perm[i]));
             }
+            // TODO: Add a check for output dimensions...
         }
     }
+
+    var x_i: [XT.Rank]XT.SizesType = undefined;
+    var y_i: [YT.Rank]YT.SizesType = undefined;
+    var z_i: [ZT.Rank]ZT.SizesType = undefined;
+
     @memset(z.values, 0);
 
-    innerProductImpl(plan, x, y, z);
+    @call(.always_inline, recursiveInnerProduct, .{ XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i });
 }
 
-// naive unrolling of inner product
-// directly accumulate the indices 
-// TODO:
-//   turn this version into a last resort
-//   and only dispatch if a better option
-//   isn't available due to dimensions
-fn innerProductImpl(
+pub inline fn sizeSelector(comptime x_index: usize, comptime y_index: usize, comptime select: usize, x: anytype, y: anytype) usize {
+    if (select == 0) {
+        return x.getSize(x_index);
+    } else {
+        return y.getSize(y_index);
+    }
+}
+
+pub inline fn recursiveInnerProduct(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime I: usize, // starting index
     comptime plan: anytype, // InnerProductPlan
     x: anytype, // lhs operand tensor
     y: anytype, // rhs operand tensor
     z: anytype, // output tensor
+    xc: *[@TypeOf(x.*).Rank]IT, // index container
+    yc: *[@TypeOf(y.*).Rank]IT, // index container
+    zc: *[@TypeOf(z.*).Rank]IT, // index container
 ) void {
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    // index containers for tensor computation
-    var xc: [XT.Rank]SizeType = undefined;
-    var yc: [YT.Rank]SizeType = undefined;
-    var zc: [ZT.Rank]SizeType = undefined;
+    const size = @call(.always_inline, sizeSelector, .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y });
 
-    inline for (0..plan.total) |I| {
-        
-        const size = if (comptime plan.s_ctrl[I] == 0) 
-            x.getSize(plan.x_perm[I]) else y.getSize(plan.y_perm[I]);
-
-        for (0..size) |i| {
-
-            if (comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if (comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
-            if (comptime plan.z_perm[I] != plan.pass) { zc[plan.z_perm[I]] = i; }
-
-            if (comptime I == (plan.total - 1)) {
-                const x_n = computeTensorIndex(XT.Rank, XT.SizesType, x.getStrides(), &xc);
-                const y_n = computeTensorIndex(YT.Rank, YT.SizesType, y.getStrides(), &yc);
-                const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, z.getStrides(), &zc);
-                z.values[z_n] += x.values[x_n] * y.values[y_n];
+    if (I < (plan.total - 1)) {
+        var i: IT = 0;
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
             }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
+            if (comptime plan.z_perm[I] != plan.pass) {
+                zc[plan.z_perm[I]] = i;
+            }
+            @call(.always_inline, recursiveInnerProduct, .{ VT, IT, (I + 1), plan, x, y, z, xc, yc, zc });
+        }
+    } else {
+        var i: IT = 0;
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
+            if (comptime plan.z_perm[I] != plan.pass) {
+                zc[plan.z_perm[I]] = i;
+            }
+            const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc);
+            const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc);
+            const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc);
+            z.values[z_n] += x.values[x_n] * y.values[y_n];
         }
     }
 }
@@ -405,65 +438,77 @@ fn innerProductImpl(
 // TODO: Add explanation for this crazy thing...
 
 pub fn outerProduct(comptime expression: []const u8, x: anytype, y: anytype, z: anytype) void {
-    if (!x.isValid() or !y.isValid() or !z.isValid()) {
-        return TensorError.InvalidTensorLayout;
-    }
+    std.debug.assert(x.isValid() and y.isValid() and z.isValid());
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
     const plan = comptime outerProductParse(XT.Rank, YT.Rank, ZT.Rank, expression);
 
-    if (Util.debug) {
+    if (comptime Util.debug) {
         for (plan.x_perm, plan.y_perm, plan.z_perm) |xp, yp, zp| {
-            if (xp != plan.pass and x.getSize(xp) != z.getSize(zp))
-                return OpsError.InvalidDimensions;
-            if (yp != plan.pass and y.getSize(yp) != z.getSize(zp))
-                return OpsError.InvalidDimensions;
+            if (xp != plan.pass) std.debug.assert(x.getSize(xp) == z.getSize(zp));
+            if (yp != plan.pass) std.debug.assert(y.getSize(yp) == z.getSize(zp));
         }
     }
 
+    var x_i: [XT.Rank]SizeType = undefined;
+    var y_i: [YT.Rank]SizeType = undefined;
+    var z_i: [ZT.Rank]SizeType = undefined;
+
     @memset(z.values, 0);
 
-    unreachable; //TODO
+    @call(.always_inline, recursiveInnerProduct, .{ XT.ValueType, XT.SizesType, 0, plan, x, y, z, &x_i, &y_i, &z_i });
 }
 
 pub inline fn recursiveOuterProduct(
+    comptime VT: type, // value type
+    comptime IT: type, // int type
+    comptime I: usize, // starting index
     comptime plan: anytype, // InnerProductPlan
     x: anytype, // lhs operand tensor
     y: anytype, // rhs operand tensor
     z: anytype, // output tensor
+    xc: *[@TypeOf(x.*).Rank]IT, // index container
+    yc: *[@TypeOf(y.*).Rank]IT, // index container
+    zc: *[@TypeOf(z.*).Rank]IT, // index container
 ) void {
     const XT = @TypeOf(x.*);
     const YT = @TypeOf(y.*);
     const ZT = @TypeOf(z.*);
 
-    // index containers for tensor computation
-    var xc: [XT.Rank]SizeType = undefined;
-    var yc: [YT.Rank]SizeType = undefined;
-    var zc: [ZT.Rank]SizeType = undefined;
+    const size = @call(.always_inline, sizeSelector, .{ plan.x_perm[I], plan.y_perm[I], plan.s_ctrl[I], x, y });
 
-    inline for (0..plan.total) |I| {
-
-        const size = if (plan.s_ctrl[I] == 0) 
-            x.getSize(plan.x_perm[I]) else y.getSize(plan.y_perm[I]);
-
-        var i: SizeType = 0;
-
+    if (I < (plan.total - 1)) {
+        var i: IT = 0;
         while (i < size) : (i += 1) {
-            if (comptime plan.x_perm[I] != plan.pass) { xc[plan.x_perm[I]] = i; }
-            if (comptime plan.y_perm[I] != plan.pass) { yc[plan.y_perm[I]] = i; }
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
             zc[plan.z_perm[I]] = i;
+            @call(.always_inline, recursiveInnerProduct, .{ VT, IT, (I + 1), plan, x, y, z, xc, yc, zc });
         }
-
-        if (I == (plan.total - 1)) {
-             const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc.*);
-             const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc.*);
-             const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc.*);
-             z.values[z_n] += x.values[x_n] * y.values[y_n];
+    } else {
+        var i: IT = 0;
+        while (i < size) : (i += 1) {
+            if (comptime plan.x_perm[I] != plan.pass) {
+                xc[plan.x_perm[I]] = i;
+            }
+            if (comptime plan.y_perm[I] != plan.pass) {
+                yc[plan.y_perm[I]] = i;
+            }
+            zc[plan.z_perm[I]] = i;
+            const x_n = computeTensorIndex(XT.Rank, XT.SizesType, &x.sizes_and_strides.strides, xc);
+            const y_n = computeTensorIndex(YT.Rank, YT.SizesType, &y.sizes_and_strides.strides, yc);
+            const z_n = computeTensorIndex(ZT.Rank, ZT.SizesType, &z.sizes_and_strides.strides, zc);
+            z.values[z_n] += x.values[x_n] * y.values[y_n];
         }
     }
 }
+
 
 // <>--------------------------------------------------------<>
 

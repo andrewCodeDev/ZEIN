@@ -66,8 +66,8 @@ pub inline fn computeTensorIndex(
         1 => indices[0], // direct index... just an array
         2 => indices[0] * strides[0] + indices[1] * strides[1],
         else => blk: { // inner product between indices and strides
-            const s: @Vector(rank, size_type) = strides[0..rank];
-            const i: @Vector(rank, size_type) = indices[0..rank];
+            const s: @Vector(rank, size_type) = strides[0..rank].*;
+            const i: @Vector(rank, size_type) = indices[0..rank].*;
             break :blk @reduce(ReduceOp.Add, s * i);
         },
     };
