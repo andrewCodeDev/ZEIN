@@ -262,7 +262,7 @@ pub fn LinearCachingAllocator(comptime config: Config) type {
         pub fn init(fallback: std.mem.Allocator) Self {
             return Self {
                 .backing_allocator = fallback,
-                .cache = OrderedCache.init(std.heap.page_allocator)
+                .cache = OrderedCache.init(fallback)
             };
         }
 
