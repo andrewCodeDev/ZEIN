@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // define primary (static library) artifact
     const lib = b.addStaticLibrary(.{
         .name = "ZEIN",
-        .root_source_file = .{ .path = "src/root.zig" },
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -16,11 +16,19 @@ pub fn build(b: *std.Build) void {
 
     // create secondary (unit testing) artifact
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/root.zig" },
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
     const run_tests = b.addRunArtifact(unit_tests);
+
+    // export ZEIN module so it can
+    // be used in other projects
+    _ = b.addModule("ZEIN", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     // define test step dependency
     const test_step = b.step("test", "Run unit tests");
