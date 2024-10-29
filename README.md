@@ -2,6 +2,24 @@
 
 Zig-based implementation of general-rank tensors! [1, 64)
 
+## Importing ZEIN
+
+1. Fetch ZEIN:
+
+`zig fetch --save git+https://github.com/andrewCodeDev/ZEIN#main`
+
+2. Add the module in your `build.zig`:
+
+```zig
+const zein = b.dependency("ZEIN", .{
+    .target = target,
+    .optimize = optimize,
+});
+
+exe.root_module.addImport("zein", zein.module("ZEIN"));
+```
+You can now add `const zein = @import("zein");` to your file.
+
 ## Using Tensor Objects
 
 Tensors can be created in the following way:
